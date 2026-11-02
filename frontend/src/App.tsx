@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Scope, { type ConflictLine } from "./components/Scope";
 import { AlertCard } from "./components/AlertPanel";
 import { ApprovalCard } from "./components/ApprovalQueue";
-import BotRoster from "./components/BotRoster";
+import BotRoster, { HelperSettings } from "./components/BotRoster";
 import BriefingView from "./components/BriefingView";
 import ShiftLog from "./components/ShiftLog";
 import MetricsStrip, { minutesAssumptions } from "./components/MetricsStrip";
@@ -27,7 +27,10 @@ export default function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [outputId, setOutputId] = useState<number | null>(null);
-  const [theme, setTheme] = useState<"dark" | "light">(() => stored("clearance.theme", "dark"));
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    const q = new URLSearchParams(location.search).get("theme");
+    return q === "light" || q === "dark" ? q : stored("clearance.theme", "dark");
+  });
   const [intro, setIntro] = useState(() => !new URLSearchParams(location.search).has("nointro"));
   const [caption, setCaption] = useState<string | null>(null);
   const nextStep = useRef<(() => void) | null>(null);
@@ -134,21 +137,15 @@ export default function App() {
             <div className="p-8 text-gray-500">Connecting…</div>
           )}
 
-          {/* what's happening now (guided demo) */}
-          {!live && caption && (
-            <div className="pointer-events-none absolute inset-x-0 top-3 z-[500] flex justify-center px-4">
-              <div className="max-w-2xl rounded-xl bg-black/80 px-4 py-2 text-center text-sm text-white shadow-lg backdrop-blur">{caption}</div>
-            </div>
-          )}
-
           {/* top-left: what am I looking at + selected plane */}
           {sim && (
-            <div className={`pointer-events-none absolute left-3 z-[500] space-y-2 ${!live && caption ? "top-16" : "top-3"}`}>
-              <div className="rounded-lg bg-black/75 px-3 py-1.5 text-xs text-gray-300">
-                {live
-                  ? <>🔴 Live · <b>{sim.aircraft.length}</b> planes near Atlanta · source {sim.live?.provider || "connecting…"}{sim.live?.error && <span className="text-amber-400"> · feed error, showing the last update</span>}</>
-                  : <>Practice scenario · <b>{sim.aircraft.length}</b> planes</>}
-              </div>
+            <div className="pointer-events-none absolute left-3 top-3 z-[500] space-y-2">
+              {live && (
+                <div className="rounded-lg bg-black/75 px-3 py-1.5 text-xs text-gray-300">
+                  🔴 Live · <b>{sim.aircraft.length}</b> planes near Atlanta · source {sim.live?.provider || "connecting…"}
+                  {sim.live?.error && <span className="text-amber-400"> · feed error, showing the last update</span>}
+                </div>
+              )}
               {sel && (
                 <div className="pointer-events-auto w-64 rounded-xl border border-cyan-700 bg-black/85 p-3 text-xs shadow-xl">
                   <div className="flex items-start">
@@ -171,16 +168,21 @@ export default function App() {
           )}
 
           {/* legend */}
-          <div className="pointer-events-none absolute bottom-24 right-3 z-[500] space-y-1 rounded-lg bg-black/75 px-3 py-2 text-[11px] text-gray-300">
-            <div><span className="text-[#ffc400]">✈</span> Airliner / jet</div>
-            <div><span className="text-gray-200">✈</span> Small plane</div>
-            <div><span className="text-red-500">✈</span> Too close: see card</div>
-            <div><span className="text-amber-400">■</span> Storm</div>
+          <div className="pointer-events-none absolute bottom-6 right-14 z-[500] flex gap-3 rounded-lg bg-black/70 px-3 py-1 text-[11px] text-gray-300">
+            <span><span className="text-[#ffc400]">✈</span> Airliner</span>
+            <span><span className="text-gray-200">✈</span> Small plane</span>
+            <span><span className="text-red-500">✈</span> Too close</span>
+            <span><span className="text-amber-400">■</span> Storm</span>
           </div>
 
           {/* bottom-left: one-button demo */}
           {sim && !live && (
-            <div className="pointer-events-none absolute bottom-4 left-4 z-[600]">
+            <div className="pointer-events-none absolute bottom-4 left-4 z-[600] flex max-w-[calc(100%-2rem)] flex-col items-start gap-2">
+              {caption && (
+                <div className="max-w-[540px] rounded-xl bg-black/85 px-4 py-2.5 text-sm leading-snug text-white shadow-lg backdrop-blur">
+                  <span className="mr-1 text-amber-400">●</span>{caption}
+                </div>
+              )}
               <DemoStepper t={sim.t} nextRef={nextStep} onStep={() => setDrawer(null)} onCaption={setCaption} />
             </div>
           )}
@@ -197,6 +199,7 @@ export default function App() {
                     <button onClick={() => setDrawer(null)} className="ml-auto text-lg text-gray-500 hover:text-white">✕</button>
                   </div>
                   <MetricsStrip snap={snap} />
+                  <HelperSettings roster={snap.bots.roster} />
                   <div className="min-h-0 flex-1"><ShiftLog log={snap.log} /></div>
                 </div>
               )}
@@ -218,9 +221,9 @@ export default function App() {
               </div>
             )}
           </div>
-          <div className="border-t border-gray-800 p-2">
-            <div className="px-2 pb-1 text-xs font-bold uppercase tracking-widest text-gray-500">AI helpers</div>
-            <BotRoster roster={snap?.bots.roster ?? []} hasOutput={(r) => outputs.some((o) => o.role === r)} onOpen={openRole} />
+          <div className="border-t border-gray-800 p-3">
+            <div className="pb-2 text-xs font-bold uppercase tracking-widest text-gray-500">AI helpers</div>
+            <BotRoster roster={snap?.bots.roster ?? []} hasOutput={(r) => outputs.some((o) => o.role === r)} onOpen={openRole} live={live} />
           </div>
         </aside>
       </div>

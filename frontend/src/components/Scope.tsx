@@ -46,6 +46,7 @@ export default function Scope({ scenario, sim, selected, onSelect, conflicts = [
   const trail = useRef<{ cs: string | null; pts: L.LatLngTuple[]; line: L.Polyline | null }>({ cs: null, pts: [], line: null });
   const motion = useRef({ running: sim.running, speed: sim.speed });
   const lines = useRef<{ c: ConflictLine; line: L.Polyline; tag: L.Marker }[]>([]);
+  const airportLabel = useRef<L.Marker | null>(null);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
 
@@ -61,6 +62,7 @@ export default function Scope({ scenario, sim, selected, onSelect, conflicts = [
     const d = 30 / 60; // ~30 nm around the airport
     m.fitBounds([[lat0 - d, lon0 - d * 1.2], [lat0 + d, lon0 + d * 1.2]]);
     m.on("click", () => onSelectRef.current(null));
+    m.on("zoomend moveend", () => declutter.current());
     staticLayer.current = L.layerGroup().addTo(m);
     wxLayer.current = L.layerGroup().addTo(m);
     conflictLayer.current = L.layerGroup().addTo(m);
@@ -89,9 +91,9 @@ export default function Scope({ scenario, sim, selected, onSelect, conflicts = [
     for (const rw of scenario.runways) {
       L.polyline([toLL(rw.thr), toLL(rw.end)], { color: theme === "dark" ? "#e5e7eb" : "#334155", weight: 4, opacity: 0.9, interactive: false }).addTo(g);
     }
-    L.marker([lat0 - 0.035, lon0], {
+    airportLabel.current = L.marker([lat0 - 0.04, lon0], {
       interactive: false,
-      icon: L.divIcon({ className: "airport-label", html: `<span>ATL · Atlanta airport</span>`, iconSize: [0, 0] }),
+      icon: L.divIcon({ className: "airport-label", html: `<span>ATL airport</span>`, iconSize: [0, 0] }),
     }).addTo(g);
   }, [scenario, theme]);
 
@@ -161,12 +163,57 @@ export default function Scope({ scenario, sim, selected, onSelect, conflicts = [
     // red link between planes that are too close
     const g = conflictLayer.current!;
     g.clearLayers();
-    lines.current = conflicts.map((c) => ({
-      c,
-      line: L.polyline([[0, 0], [0, 0]], { color: "#ef4444", weight: 3, dashArray: "6 6", interactive: false }).addTo(g),
-      tag: L.marker([0, 0], { interactive: false, icon: L.divIcon({ className: "conflict-tag", html: `<span>${c.label}</span>`, iconSize: [0, 0] }) }).addTo(g),
-    }));
+    lines.current = conflicts.flatMap((c) => {
+      const a = tracks.current.get(c.a)?.marker.getLatLng(), b = tracks.current.get(c.b)?.marker.getLatLng();
+      if (!a || !b) return [];
+      const mid = L.latLng((a.lat + b.lat) / 2, (a.lng + b.lng) / 2);
+      return [{
+        c,
+        line: L.polyline([a, b], { color: "#ef4444", weight: 3, dashArray: "6 6", interactive: false }).addTo(g),
+        tag: L.marker(mid, { interactive: false, icon: L.divIcon({ className: "conflict-tag", html: `<span>${c.label}</span>`, iconSize: [0, 0] }) }).addTo(g),
+      }];
+    });
+    declutter.current();
   }, [sim, selected, conflicts]);
+
+  // ---- label declutter: hide labels that would overlap a more important one ------
+  const declutter = useRef<() => void>(() => {});
+  declutter.current = () => {
+    const placed: DOMRect[] = [];
+    const hit = (r: DOMRect) => placed.some((p) => r.left < p.right + 2 && r.right > p.left - 2 && r.top < p.bottom + 1 && r.bottom > p.top - 1);
+    const place = (el: HTMLElement | null | undefined, force = false) => {
+      if (!el) return;
+      el.classList.remove("above");
+      let r = el.getBoundingClientRect();
+      if (r.width === 0) return; // display:none
+      if (hit(r) && el.classList.contains("plane-label")) {
+        el.classList.add("above"); // try the other side of the plane first
+        const up = el.getBoundingClientRect();
+        if (!hit(up)) r = up;
+        else if (!force) el.classList.remove("above");
+        else r = up;
+      }
+      const ok = force || !hit(r);
+      el.style.visibility = ok ? "visible" : "hidden";
+      if (ok) placed.push(r);
+    };
+    // priority: conflict distance tags, planes in conflict, selected plane, airport, then airliners
+    document.querySelectorAll<HTMLElement>(".conflict-tag span, .wx-label").forEach((el) => place(el, true));
+    const ranked = [...tracks.current.values()].sort((a, b) => rank(a) - rank(b) || a.ac.callsign.localeCompare(b.ac.callsign));
+    const firstNormal = ranked.findIndex((t) => rank(t) >= 2);
+    ranked.slice(0, firstNormal < 0 ? ranked.length : firstNormal).forEach((t) => place(t.label, true));
+    place(airportLabel.current?.getElement()?.querySelector<HTMLElement>("span"));
+    ranked.slice(firstNormal < 0 ? ranked.length : firstNormal).forEach((t) => place(t.label));
+  };
+  function rank(t: Track): number {
+    if (t.label.classList.contains("hot")) return 0;
+    if (t.label.classList.contains("sel")) return 1;
+    return 2;
+  }
+  useEffect(() => {
+    const id = window.setInterval(() => declutter.current(), 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
   // ---- smooth motion between ticks -------------------------------------------
   useEffect(() => {
@@ -198,5 +245,5 @@ export default function Scope({ scenario, sim, selected, onSelect, conflicts = [
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  return <div ref={box} className={`absolute inset-0 ${theme === "dark" ? "bg-[#0e1117]" : "bg-[#e8eaed]"}`} />;
+  return <div ref={box} className={`absolute inset-0 isolate z-0 overflow-hidden ${theme === "dark" ? "bg-[#0e1117]" : "bg-[#e8eaed]"}`} />;
 }

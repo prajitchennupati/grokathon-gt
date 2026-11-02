@@ -73,7 +73,16 @@ def test_parallel_finals_detected_and_suppressed():
 def test_light_aircraft_and_duplicates_not_probed():
     from app.live.feed import Target
     eng = LiveEngine(load_scenario(SCENARIO))
-    mk = lambda hx, cs, cat, lat=33.80: Target(hx, cs, "X", lat, -84.20, 6000, 200, 90, 0, None, "4512", 0.5, cat)
+    mk = lambda hx, cs, cat, lat=33.80: Target(hx, cs, "X", lat, -84.20, 9000, 200, 90, 0, None, "4512", 0.5, cat)
     eng.update([mk("a", "N1", "A1", lat=33.90), mk("b", "DAL1", "A3"), mk("c", "DAL1", "A3", lat=33.80001)], "test")
     assert eng.aircraft["N1"].probe_exempt and not eng.aircraft["DAL1"].probe_exempt
     assert len(eng.aircraft) == 2  # duplicate DAL1 dropped
+
+
+def test_approach_area_traffic_not_probed():
+    from app.live.feed import Target
+    eng = LiveEngine(load_scenario(SCENARIO))
+    near = Target("a", "DAL1", "B712", 33.64, -84.60, 2800, 210, 63, 0, None, "4512", 0.5, "A3")  # ~8 nm W at 2,800
+    far = Target("b", "DAL2", "B712", 34.10, -84.43, 9000, 250, 180, 0, None, "4512", 0.5, "A3")  # ~28 nm N at 9,000
+    eng.update([near, far], "test")
+    assert eng.aircraft["DAL1"].probe_exempt and not eng.aircraft["DAL2"].probe_exempt

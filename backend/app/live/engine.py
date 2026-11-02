@@ -23,6 +23,8 @@ CEILING_FT = 17_500
 STALE_S = 45
 EAST_FLOW_IDS = {"26R": "8L", "27L": "9R", "28": "10"}
 AIRLINE_RE = re.compile(r"^[A-Z]{3}\d")
+APPROACH_AREA_NM = 18.0  # live: arrivals turning onto parallel finals look like collisions to a
+APPROACH_AREA_FT = 7000.0  # straight-line probe; real controllers use visual/tower separation here
 FINAL_MAX_NM = 20.0  # how far out an aircraft counts as established on final
 FINAL_MAX_FT = 7000.0
 
@@ -112,7 +114,8 @@ class LiveEngine(SimEngine):
                 flight_rules="VFR" if tg.squawk == "1200" else "IFR",
                 # light aircraft and gliders mostly fly VFR/training with no separation standard
                 probe_exempt=tg.category in ("A1", "A7") or tg.category.startswith("B")
-                or (not tg.category and not AIRLINE_RE.match(tg.callsign)),
+                or (not tg.category and not AIRLINE_RE.match(tg.callsign))
+                or (math.hypot(x, y) < APPROACH_AREA_NM and alt < APPROACH_AREA_FT),
             )
             self._types[cs] = {"hex": tg.hex, "squawk": tg.squawk}
             self._seen[cs] = now

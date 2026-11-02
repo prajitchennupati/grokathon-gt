@@ -6,7 +6,7 @@ export default function Intro({ onDemo, onLive, onClose }: { onDemo: () => void;
     { icon: "✎", title: "Helpers do the paperwork", text: "Four AI helpers write briefings, messages and reports. Nothing is sent without approval." },
   ];
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm" onClick={onClose}>
+    <div className="absolute inset-0 z-[2000] flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm" onClick={onClose}>
       <div className="w-full max-w-3xl rounded-2xl border border-gray-700 bg-[#0f141a] p-8 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="text-xs font-bold uppercase tracking-[0.3em] text-green-400">Clearance</div>
         <h1 className="mt-2 text-3xl font-bold text-white">An AI co-pilot for air traffic controllers</h1>

@@ -129,7 +129,7 @@ def canned_relief(c: dict[str, Any]) -> BotDraft:
     alert_txt = "; ".join("/".join(a["pair"]) + f" ({a['max_severity']})" for a in alerts) or "none"
     n_pend = len(c["pending_approvals"])
     rw = c["active_runways"]
-    body = f"""# Relief briefing — {c['sim_time']}
+    body = f"""# Handover notes
 
 - [ ] **Weather:** {_metar_brief(c['weather']['metar'])}{f'; {cells}' if cells else ''}.
 - [ ] **Runways:** landing {' / '.join(rw['arrivals'])}, departing {' / '.join(rw['departures'])}.
@@ -138,7 +138,7 @@ def canned_relief(c: dict[str, Any]) -> BotDraft:
 - [ ] **Conflicts:** {alert_txt}.
 - [ ] **Pending:** {f'{n_pend} item(s) awaiting your approval' if n_pend else 'nothing'}.
 """
-    return BotDraft(title="Relief briefing", body_markdown=body)
+    return BotDraft(title="Handover notes", body_markdown=body)
 
 
 def canned_coordination(c: dict[str, Any]) -> BotDraft:
