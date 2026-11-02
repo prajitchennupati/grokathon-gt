@@ -8,6 +8,7 @@ between so the scope moves smoothly. Only airborne traffic inside the terminal a
 from __future__ import annotations
 
 import math
+import re
 import time
 from typing import Any, Optional
 
@@ -21,6 +22,7 @@ RADIUS_NM = 40
 CEILING_FT = 17_500
 STALE_S = 45
 EAST_FLOW_IDS = {"26R": "8L", "27L": "9R", "28": "10"}
+AIRLINE_RE = re.compile(r"^[A-Z]{3}\d")
 FINAL_MAX_NM = 20.0  # how far out an aircraft counts as established on final
 FINAL_MAX_FT = 7000.0
 
@@ -36,7 +38,10 @@ class LiveEngine(SimEngine):
     # Real VFR traffic gets traffic advisories, not separation: don't raise conflict alerts for it.
     alert_on_vfr = False
     resolve_after_ticks = 10  # feed updates every 5 s; don't flap alerts on jitter
-    vertical_alert_ft = 900.0  # 1,000 ft minimum less ~100 ft ADS-B altitude tolerance
+    # Real traffic is already separated by real controllers (visual approaches, reduced spacing on
+    # final, sequencing) and we have no flight plans, so only flag genuinely close approaches.
+    vertical_alert_ft = 500.0
+    lateral_alert_nm = 1.5
 
     def __init__(self, base: Scenario) -> None:
         live = base.model_copy(update={
@@ -48,6 +53,7 @@ class LiveEngine(SimEngine):
         self.error = ""
         self.east_flow = False
         self.metar: dict[str, Any] = {}
+        self.wx_fetched_at = 0.0
         self._seen: dict[str, float] = {}
         self._types: dict[str, dict[str, Any]] = {}
         super().__init__(live)
@@ -105,7 +111,8 @@ class LiveEngine(SimEngine):
                 tgt_alt_ft=tgt_alt, tgt_gs_kt=tg.gs_kt, vs_fpm=tg.vs_fpm,
                 flight_rules="VFR" if tg.squawk == "1200" else "IFR",
                 # light aircraft and gliders mostly fly VFR/training with no separation standard
-                probe_exempt=tg.category in ("A1", "A7") or tg.category.startswith("B"),
+                probe_exempt=tg.category in ("A1", "A7") or tg.category.startswith("B")
+                or (not tg.category and not AIRLINE_RE.match(tg.callsign)),
             )
             self._types[cs] = {"hex": tg.hex, "squawk": tg.squawk}
             self._seen[cs] = now

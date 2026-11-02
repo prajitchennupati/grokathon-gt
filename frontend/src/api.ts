@@ -22,6 +22,8 @@ export interface ScenarioStatic {
 export interface AircraftView {
   callsign: string;
   type: string;
+  lat: number;
+  lon: number;
   x: number;
   y: number;
   alt_ft: number;

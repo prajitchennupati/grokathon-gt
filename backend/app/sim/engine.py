@@ -36,6 +36,7 @@ class SimEngine:
     alert_on_vfr = True  # scripted scenarios include a VFR pop-up conflict
     resolve_after_ticks = 3
     vertical_alert_ft = 1000.0
+    lateral_alert_nm = 3.0
 
     def __init__(self, scenario: Scenario) -> None:
         self.scenario = scenario

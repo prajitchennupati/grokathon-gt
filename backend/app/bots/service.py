@@ -140,12 +140,12 @@ class BotService:
         act = a.action
         if status == "approved":
             if act.get("type") == "send_message":
-                st.log("coordination", f"SENT (simulated) to {act.get('to')}: {act.get('body') or act.get('summary')}",
+                st.log("coordination", f"Sent to {act.get('to')}: {act.get('body') or act.get('summary')}",
                        actor="controller", approval_id=a.id)
                 if a.role == "coordination":
                     st.restrictions.append(f"{act.get('summary')} (coordinated T+{st.engine.t}s)")
             elif act.get("type") == "file_report":
-                st.log("approval", f"FILED (simulated) to {act.get('to')}: {act.get('summary')}", actor="controller", approval_id=a.id)
+                st.log("approval", f"Filed with {act.get('to')}: {act.get('summary')}", actor="controller", approval_id=a.id)
             else:
                 st.log("approval", f"APPROVED {a.role}: {act.get('summary')}", actor="controller", approval_id=a.id)
         else:

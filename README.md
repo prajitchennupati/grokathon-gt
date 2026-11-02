@@ -98,7 +98,12 @@ the Wi-Fi dies.
 | `DEMO_MODE` | `0` | Set by `make demo` |
 | `TRAFFIC_SOURCE` | `scenario` | `live` = start on real ADS-B traffic |
 
-**Using it.** The screen has three parts: the radar, a **Needs you** column (conflicts and Bot requests,
+**Map.** Esri's keyless Canvas basemaps (dark or light, with place names), drawn with
+[Leaflet](https://leafletjs.com). Planes are Flightradar-style icons that glide between updates. A red
+dashed line joins two planes that are too close. CARTO tiles were dropped because they now need an API key.
+The map tiles need internet; without it, planes still show on a plain background.
+
+**Using it.** The first screen explains the app in three cards (add `?nointro` to the URL to skip it). The screen has three parts: the radar, a **Needs you** column (conflicts and Bot requests,
 each with one or two big buttons) and a **Bots** list (click one to read its latest document). In **DEMO**
 mode, the **Next ▶** button at the bottom left walks through the six beats. **● LIVE ATL** switches to real
 traffic.
@@ -118,10 +123,11 @@ Atlanta:
 - **Weather:** the real KATL METAR/TAF from aviationweather.gov. The runway flow (east/west) is chosen from
   the real wind, and the Briefing Bot uses the real METAR/TAF. NOTAMs, closures and TMIs remain sample data,
   and the briefing says so.
-- **Conflict alerts** run on the same probe, with the suppression a real facility would apply: aircraft
-  established on finals to different parallel runways, low traffic near the airport, VFR (1200) and light
-  aircraft (ADS-B category A1) are excluded, with a 100 ft ADS-B altitude tolerance. Without flight-plan
-  data some alerts are still nuisance alerts.
+- **Conflict alerts** run on the same probe. Real traffic is already being separated by real controllers,
+  and there's no flight-plan data, so live mode flags only genuinely close approaches (under 1.5 nm and
+  500 ft). It also skips parallel finals, low traffic near the airport, VFR (1200) and light aircraft.
+- **The briefing shows only real data** in live mode: runways from the wind plus the METAR/TAF. The sample
+  NOTAMs, closures and TMIs appear only in the guided demo.
 - **Approving does nothing to a real aircraft.** In live mode, *Approve* becomes *Log as issued*. The
   scripted events (weather, relief, end of shift) don't happen on their own; use each Bot's **run** link.
 

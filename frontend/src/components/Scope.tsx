@@ -1,307 +1,202 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import type { AircraftView, ScenarioStatic, SimSnapshot, XY } from "../api";
+import { flightName, ft, isBig } from "../friendly";
+
+export interface ConflictLine { a: string; b: string; label: string }
 
 interface Props {
   scenario: ScenarioStatic;
   sim: SimSnapshot;
   selected: string | null;
   onSelect: (callsign: string | null) => void;
-  /** Callsigns to draw as conflicting (red). */
-  conflicts?: string[];
+  conflicts?: ConflictLine[];
+  theme: "dark" | "light";
 }
 
-const C = {
-  ring: "rgba(57,255,122,0.16)",
-  ringLabel: "rgba(57,255,122,0.4)",
-  runway: "#d9e6df",
-  centerline: "rgba(200,220,210,0.35)",
-  fix: "rgba(46,230,255,0.55)",
-  sector: "rgba(120,140,255,0.12)",
-  target: "#39ff7a",
-  vfr: "#f2f27a",
-  select: "#2ee6ff",
-  conflict: "#ff4545",
-  wxFill: { light: "rgba(40,120,60,0.25)", moderate: "rgba(150,150,40,0.28)", heavy: "rgba(190,120,20,0.32)", extreme: "rgba(200,40,40,0.35)" } as Record<string, string>,
-  wxEdge: "rgba(230,170,40,0.75)",
+// Esri Canvas basemaps: keyless, with a separate place-name layer on top. (CARTO now needs an API key.)
+const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas";
+const TILES = {
+  dark: [`${ESRI}/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}`, `${ESRI}/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}`],
+  light: [`${ESRI}/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}`, `${ESRI}/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}`],
 };
+const ATTRIBUTION = "Map &copy; Esri, HERE, Garmin, &copy; OpenStreetMap contributors";
 
-const TRAIL = 6;
-const RING_NM = 5;
-const MAX_RING_NM = 45;
+// Material "flight" glyph (Apache-2.0), nose pointing north
+const PLANE_SVG = `<svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>`;
 
-export default function Scope({ scenario, sim, selected, onSelect, conflicts = [] }: Props) {
-  const wrap = useRef<HTMLDivElement>(null);
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const trails = useRef<Map<string, XY[]>>(new Map());
-  const lastT = useRef<number>(-1);
-  const [size, setSize] = useState({ w: 800, h: 600 });
-  const [view, setView] = useState({ scale: 11, cx: 0, cy: 0 }); // px per nm, center in nm
-  const fitted = useRef(false);
+interface Track {
+  marker: L.Marker;
+  glyph: HTMLElement;
+  label: HTMLElement;
+  ac: AircraftView;
+  t0: number;
+}
 
-  // fit ~32 nm around the airport the first time the pane has a real size
-  const userMoved = useRef(false);
+/** Real map with Flightradar-style plane icons. Positions glide between sim ticks. */
+export default function Scope({ scenario, sim, selected, onSelect, conflicts = [], theme }: Props) {
+  const box = useRef<HTMLDivElement>(null);
+  const map = useRef<L.Map | null>(null);
+  const tiles = useRef<L.TileLayer[]>([]);
+  const tracks = useRef<Map<string, Track>>(new Map());
+  const staticLayer = useRef<L.LayerGroup | null>(null);
+  const wxLayer = useRef<L.LayerGroup | null>(null);
+  const conflictLayer = useRef<L.LayerGroup | null>(null);
+  const trail = useRef<{ cs: string | null; pts: L.LatLngTuple[]; line: L.Polyline | null }>({ cs: null, pts: [], line: null });
+  const motion = useRef({ running: sim.running, speed: sim.speed });
+  const lines = useRef<{ c: ConflictLine; line: L.Polyline; tag: L.Marker }[]>([]);
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+
+  const { lat: lat0, lon: lon0 } = scenario.airport;
+  const toLL = ([x, y]: XY): L.LatLngTuple => [lat0 + y / 60, lon0 + x / (60 * Math.cos((lat0 * Math.PI) / 180))];
+
+  // ---- map setup ---------------------------------------------------------
   useEffect(() => {
-    if (userMoved.current || size.w < 100 || size.h < 100) return;
-    fitted.current = true;
-    setView({ scale: Math.min(size.w, size.h) / 64, cx: 0, cy: 0 });
-  }, [size.w, size.h]);
-  const drag = useRef<{ x: number; y: number; cx: number; cy: number; moved: boolean } | null>(null);
-  const [, setBlink] = useState(0);
-
-  // conflict targets flash independently of the sim tick
-  useEffect(() => {
-    if (!conflicts.length) return;
-    const id = window.setInterval(() => setBlink((b) => b + 1), 250);
-    return () => window.clearInterval(id);
-  }, [conflicts.length]);
-
-  // history trails, one dot per sim second
-  if (sim.t !== lastT.current) {
-    if (sim.t < lastT.current) trails.current.clear();
-    lastT.current = sim.t;
-    const live = new Set<string>();
-    for (const a of sim.aircraft) {
-      live.add(a.callsign);
-      const tr = trails.current.get(a.callsign) ?? [];
-      tr.push([a.x, a.y]);
-      if (tr.length > TRAIL + 1) tr.shift();
-      trails.current.set(a.callsign, tr);
-    }
-    for (const k of [...trails.current.keys()]) if (!live.has(k)) trails.current.delete(k);
-  }
-
-  useEffect(() => {
-    const el = wrap.current;
-    if (!el) return;
-    const measure = () => {
-      const r = el.getBoundingClientRect();
-      setSize((s) => (s.w === r.width && s.h === r.height ? s : { w: r.width, h: r.height }));
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    window.addEventListener("resize", measure);
-    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
+    if (!box.current || map.current) return;
+    const m = L.map(box.current, { zoomControl: false, attributionControl: true, zoomSnap: 0.25 });
+    L.control.zoom({ position: "bottomright" }).addTo(m);
+    m.attributionControl.setPrefix(false);
+    const d = 30 / 60; // ~30 nm around the airport
+    m.fitBounds([[lat0 - d, lon0 - d * 1.2], [lat0 + d, lon0 + d * 1.2]]);
+    m.on("click", () => onSelectRef.current(null));
+    staticLayer.current = L.layerGroup().addTo(m);
+    wxLayer.current = L.layerGroup().addTo(m);
+    conflictLayer.current = L.layerGroup().addTo(m);
+    map.current = m;
+    const ro = new ResizeObserver(() => m.invalidateSize());
+    ro.observe(box.current);
+    return () => { ro.disconnect(); m.remove(); map.current = null; tracks.current.clear(); };
   }, []);
 
-  const toPx = (x: number, y: number): XY => [size.w / 2 + (x - view.cx) * view.scale, size.h / 2 - (y - view.cy) * view.scale];
-  const toNm = (px: number, py: number): XY => [view.cx + (px - size.w / 2) / view.scale, view.cy - (py - size.h / 2) / view.scale];
-
   useEffect(() => {
-    const cv = canvas.current;
-    if (!cv) return;
-    const dpr = window.devicePixelRatio || 1;
-    cv.width = size.w * dpr;
-    cv.height = size.h * dpr;
-    const g = cv.getContext("2d")!;
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    draw(g);
-  });
+    const m = map.current;
+    if (!m) return;
+    tiles.current.forEach((t) => t.remove());
+    const [base, labels] = TILES[theme];
+    tiles.current = [
+      L.tileLayer(base, { attribution: ATTRIBUTION, maxZoom: 16 }).addTo(m),
+      L.tileLayer(labels, { maxZoom: 16, opacity: 0.9 }).addTo(m),
+    ];
+  }, [theme]);
 
-  function draw(g: CanvasRenderingContext2D) {
-    g.fillStyle = "#000";
-    g.fillRect(0, 0, size.w, size.h);
-    g.font = "12px var(--font-mono), monospace";
-    g.textBaseline = "middle";
-
-    // sectors
-    for (const s of scenario.sectors) {
-      g.strokeStyle = C.sector;
-      g.setLineDash([2, 6]);
-      poly(g, s.polygon_xy, false);
-      g.stroke();
-      g.setLineDash([]);
-    }
-
-    // range rings around the ARP
-    const [ox, oy] = toPx(0, 0);
-    g.lineWidth = 1;
-    for (let r = RING_NM; r <= MAX_RING_NM; r += RING_NM) {
-      g.strokeStyle = C.ring;
-      g.beginPath();
-      g.arc(ox, oy, r * view.scale, 0, Math.PI * 2);
-      g.stroke();
-      if (r % 10 === 0) {
-        g.fillStyle = C.ringLabel;
-        g.fillText(`${r}`, ox + 3, oy - r * view.scale + 8);
-      }
-    }
-
-    // weather
-    for (const w of sim.weather) {
-      g.fillStyle = C.wxFill[w.intensity] ?? C.wxFill.heavy;
-      g.strokeStyle = C.wxEdge;
-      g.lineWidth = 1.5;
-      poly(g, w.polygon_xy, true);
-      g.fill();
-      g.stroke();
-      const cx = w.polygon_xy.reduce((s, p) => s + p[0], 0) / w.polygon_xy.length;
-      const cy = w.polygon_xy.reduce((s, p) => s + p[1], 0) / w.polygon_xy.length;
-      const [px, py] = toPx(cx, cy);
-      g.fillStyle = C.wxEdge;
-      g.textAlign = "center";
-      g.fillText(`WX ${w.intensity.toUpperCase()}`, px, py);
-      g.textAlign = "left";
-    }
-
-    // extended centerlines (dashed) and runways
+  // ---- runways + airport label -------------------------------------------
+  useEffect(() => {
+    const g = staticLayer.current;
+    if (!g) return;
+    g.clearLayers();
     for (const rw of scenario.runways) {
-      const [tx, ty] = rw.thr;
-      const [ex, ey] = rw.end;
-      const len = Math.hypot(ex - tx, ey - ty) || 1;
-      const ux = (tx - ex) / len, uy = (ty - ey) / len;
-      g.strokeStyle = C.centerline;
-      g.lineWidth = 1;
-      g.setLineDash([6, 6]);
-      line(g, toPx(tx, ty), toPx(tx + ux * rw.final_nm, ty + uy * rw.final_nm));
-      g.setLineDash([]);
-      for (let m = 5; m <= rw.final_nm; m += 5) {
-        const [mx, my] = toPx(tx + ux * m, ty + uy * m);
-        g.beginPath();
-        g.moveTo(mx - uy * 4, my - ux * 4);
-        g.lineTo(mx + uy * 4, my + ux * 4);
-        g.stroke();
+      L.polyline([toLL(rw.thr), toLL(rw.end)], { color: theme === "dark" ? "#e5e7eb" : "#334155", weight: 4, opacity: 0.9, interactive: false }).addTo(g);
+    }
+    L.marker([lat0 - 0.035, lon0], {
+      interactive: false,
+      icon: L.divIcon({ className: "airport-label", html: `<span>ATL · Atlanta airport</span>`, iconSize: [0, 0] }),
+    }).addTo(g);
+  }, [scenario, theme]);
+
+  // ---- weather -------------------------------------------------------------
+  useEffect(() => {
+    const g = wxLayer.current;
+    if (!g) return;
+    g.clearLayers();
+    for (const w of sim.weather) {
+      L.polygon(w.polygon_xy.map(toLL), { color: "#f59e0b", weight: 2, fillColor: "#f59e0b", fillOpacity: 0.3, interactive: false })
+        .bindTooltip("⛈ Storm", { permanent: true, direction: "center", className: "wx-label" })
+        .addTo(g);
+    }
+  }, [sim.weather.length, sim.t]);
+
+  // ---- planes ----------------------------------------------------------------
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    motion.current = { running: sim.running, speed: sim.speed };
+    const now = performance.now();
+    const present = new Set<string>();
+    const inConflict = new Set(conflicts.flatMap((c) => [c.a, c.b]));
+
+    for (const ac of sim.aircraft) {
+      present.add(ac.callsign);
+      let tr = tracks.current.get(ac.callsign);
+      if (!tr) {
+        const el = document.createElement("div");
+        el.className = "plane";
+        el.innerHTML = `<div class="plane-glyph">${PLANE_SVG}</div><div class="plane-label"></div>`;
+        const cs = ac.callsign;
+        const marker = L.marker([ac.lat, ac.lon], { icon: L.divIcon({ className: "plane-icon", html: el, iconSize: [0, 0] }), keyboard: false })
+          .on("click", (e) => { L.DomEvent.stopPropagation(e); onSelectRef.current(cs); })
+          .addTo(m);
+        tr = { marker, glyph: el.querySelector<HTMLElement>(".plane-glyph")!, label: el.querySelector<HTMLElement>(".plane-label")!, ac, t0: now };
+        tracks.current.set(cs, tr);
       }
-      g.strokeStyle = C.runway;
-      g.lineWidth = 3;
-      line(g, toPx(tx, ty), toPx(ex, ey));
-      g.fillStyle = C.runway;
-      const [lx, ly] = toPx(tx + ux * 0.6, ty + uy * 0.6);
-      g.fillText(rw.id, lx + 2, ly - 7);
+      tr.ac = ac;
+      tr.t0 = now;
+      tr.marker.setLatLng([ac.lat, ac.lon]);
+      const big = isBig(ac);
+      const sel = ac.callsign === selected;
+      const hot = inConflict.has(ac.callsign);
+      tr.glyph.style.transform = `rotate(${ac.heading}deg)`;
+      tr.glyph.className = `plane-glyph ${big ? "big" : "small"}${sel ? " sel" : ""}${hot ? " hot" : ""}`;
+      tr.label.style.display = sel || hot || big ? "" : "none";
+      tr.label.className = `plane-label${hot ? " hot" : sel ? " sel" : ""}`;
+      tr.label.innerHTML = `${flightName(ac.callsign)}${sel || hot ? `<br><b>${ft(ac.alt_ft)}</b>` : ""}`;
+      tr.marker.setZIndexOffset(hot ? 1000 : sel ? 900 : big ? 100 : 0);
+    }
+    for (const [cs, tr] of tracks.current) {
+      if (!present.has(cs)) { tr.marker.remove(); tracks.current.delete(cs); }
     }
 
-    // fixes
-    for (const f of scenario.fixes) {
-      if (f.kind === "runway") continue;
-      const [px, py] = toPx(f.xy[0], f.xy[1]);
-      g.strokeStyle = C.fix;
-      g.lineWidth = 1;
-      g.beginPath();
-      g.moveTo(px, py - 4);
-      g.lineTo(px + 4, py + 3);
-      g.lineTo(px - 4, py + 3);
-      g.closePath();
-      g.stroke();
-      g.fillStyle = C.fix;
-      g.font = "10px var(--font-mono), monospace";
-      g.fillText(f.id, px + 6, py);
-      g.font = "12px var(--font-mono), monospace";
+    // trail for the selected plane only
+    const t = trail.current;
+    if (t.cs !== selected) { t.line?.remove(); t.cs = selected; t.pts = []; t.line = null; }
+    const selAc = sim.aircraft.find((a) => a.callsign === selected);
+    if (selAc) {
+      t.pts.push([selAc.lat, selAc.lon]);
+      if (t.pts.length > 120) t.pts.shift();
+      if (!t.line) t.line = L.polyline(t.pts, { color: "#22d3ee", weight: 2, opacity: 0.7, interactive: false }).addTo(m);
+      else t.line.setLatLngs(t.pts);
     }
 
-    // targets
-    const conflictSet = new Set(conflicts);
-    // minor traffic first so airliners' data blocks draw on top
-    const ordered = [...sim.aircraft].sort((a, b) => Number(!!b.minor) - Number(!!a.minor));
-    for (const a of ordered) drawTarget(g, a, conflictSet.has(a.callsign));
-  }
+    // red link between planes that are too close
+    const g = conflictLayer.current!;
+    g.clearLayers();
+    lines.current = conflicts.map((c) => ({
+      c,
+      line: L.polyline([[0, 0], [0, 0]], { color: "#ef4444", weight: 3, dashArray: "6 6", interactive: false }).addTo(g),
+      tag: L.marker([0, 0], { interactive: false, icon: L.divIcon({ className: "conflict-tag", html: `<span>${c.label}</span>`, iconSize: [0, 0] }) }).addTo(g),
+    }));
+  }, [sim, selected, conflicts]);
 
-  function drawTarget(g: CanvasRenderingContext2D, a: AircraftView, inConflict: boolean) {
-    const sel = a.callsign === selected;
-    if (a.minor && !sel && !inConflict) {
-      // light GA in live mode: a dim dot, no data block
-      const [mx, my] = toPx(a.x, a.y);
-      g.fillStyle = "rgba(57,255,122,0.35)";
-      g.fillRect(mx - 2, my - 2, 4, 4);
-      return;
-    }
-    const flash = inConflict && Math.floor(Date.now() / 500) % 2 === 0;
-    const color = inConflict ? C.conflict : sel ? C.select : a.flight_rules === "VFR" ? C.vfr : C.target;
-    const [px, py] = toPx(a.x, a.y);
+  // ---- smooth motion between ticks -------------------------------------------
+  useEffect(() => {
+    let raf = 0;
+    const frame = () => {
+      const now = performance.now();
+      const { running, speed } = motion.current;
+      const pos = new Map<string, L.LatLngTuple>();
+      for (const [cs, tr] of tracks.current) {
+        const dt = running ? Math.min(2, (now - tr.t0) / 1000) * speed : 0;
+        const h = (tr.ac.heading * Math.PI) / 180;
+        const nm = (tr.ac.gs_kt / 3600) * dt;
+        const ll: L.LatLngTuple = [
+          tr.ac.lat + (nm * Math.cos(h)) / 60,
+          tr.ac.lon + (nm * Math.sin(h)) / (60 * Math.cos((tr.ac.lat * Math.PI) / 180)),
+        ];
+        pos.set(cs, ll);
+        if (dt > 0) tr.marker.setLatLng(ll);
+      }
+      for (const { c, line, tag } of lines.current) {
+        const a = pos.get(c.a), b = pos.get(c.b);
+        if (!a || !b) continue;
+        line.setLatLngs([a, b]);
+        tag.setLatLng([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+      }
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
-    const tr = trails.current.get(a.callsign) ?? [];
-    tr.slice(0, -1).forEach(([x, y], i) => {
-      const [hx, hy] = toPx(x, y);
-      g.fillStyle = `rgba(57,255,122,${0.12 + (i / TRAIL) * 0.35})`;
-      g.fillRect(hx - 1.5, hy - 1.5, 3, 3);
-    });
-
-    // 60-second velocity vector
-    const h = (a.heading * Math.PI) / 180;
-    const vnm = a.gs_kt / 60;
-    g.strokeStyle = color;
-    g.globalAlpha = 0.5;
-    g.lineWidth = 1;
-    line(g, [px, py], toPx(a.x + Math.sin(h) * vnm, a.y + Math.cos(h) * vnm));
-    g.globalAlpha = 1;
-
-    g.fillStyle = color;
-    g.strokeStyle = color;
-    if (inConflict && flash) {
-      g.beginPath();
-      g.arc(px, py, 9, 0, Math.PI * 2);
-      g.stroke();
-    }
-    g.fillRect(px - 3, py - 3, 6, 6);
-    if (sel) g.strokeRect(px - 7, py - 7, 14, 14);
-
-    // leader line + 2-line data block
-    const lx = px + 18, ly = py - 18;
-    line(g, [px + 3, py - 3], [lx - 2, ly + 6]);
-    const alt = String(Math.round(a.alt_ft / 100)).padStart(3, "0");
-    const trend = a.vs_fpm > 300 ? "↑" : a.vs_fpm < -300 ? "↓" : " ";
-    g.fillText(a.callsign, lx, ly);
-    g.fillText(`${alt}${trend}${String(a.gs_kt).padStart(3, " ")}`, lx, ly + 12);
-  }
-
-  function poly(g: CanvasRenderingContext2D, pts: XY[], close: boolean) {
-    g.beginPath();
-    pts.forEach(([x, y], i) => {
-      const [px, py] = toPx(x, y);
-      i ? g.lineTo(px, py) : g.moveTo(px, py);
-    });
-    if (close) g.closePath();
-  }
-
-  function line(g: CanvasRenderingContext2D, a: XY, b: XY) {
-    g.beginPath();
-    g.moveTo(a[0], a[1]);
-    g.lineTo(b[0], b[1]);
-    g.stroke();
-  }
-
-  function pick(px: number, py: number): string | null {
-    let best: string | null = null;
-    let bestD = 14;
-    for (const a of sim.aircraft) {
-      const [ax, ay] = toPx(a.x, a.y);
-      const d = Math.min(Math.hypot(ax - px, ay - py), Math.hypot(ax + 30 - px, ay - 12 - py)); // target or data block
-      if (d < bestD) { bestD = d; best = a.callsign; }
-    }
-    return best;
-  }
-
-  return (
-    <div ref={wrap} className="absolute inset-0 overflow-hidden bg-black select-none">
-      <canvas
-        ref={canvas}
-        style={{ width: size.w, height: size.h }}
-        className="absolute left-0 top-0 cursor-crosshair"
-        onWheel={(e) => {
-          userMoved.current = true;
-          const [nx, ny] = toNm(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
-          const scale = Math.min(60, Math.max(3, view.scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
-          // zoom about the cursor
-          setView({ scale, cx: nx - (e.nativeEvent.offsetX - size.w / 2) / scale, cy: ny + (e.nativeEvent.offsetY - size.h / 2) / scale });
-        }}
-        onMouseDown={(e) => { drag.current = { x: e.clientX, y: e.clientY, cx: view.cx, cy: view.cy, moved: false }; }}
-        onMouseMove={(e) => {
-          const d = drag.current;
-          if (!d) return;
-          const dx = e.clientX - d.x, dy = e.clientY - d.y;
-          if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true;
-          if (d.moved) userMoved.current = true;
-          if (d.moved) setView((v) => ({ ...v, cx: d.cx - dx / v.scale, cy: d.cy + dy / v.scale }));
-        }}
-        onMouseUp={(e) => {
-          const d = drag.current;
-          drag.current = null;
-          if (d && !d.moved) onSelect(pick(e.nativeEvent.offsetX, e.nativeEvent.offsetY));
-        }}
-        onMouseLeave={() => { drag.current = null; }}
-      />
-      <div className="pointer-events-none absolute bottom-2 right-3 text-[10px] text-green-900">
-        rings {RING_NM} nm · scroll zoom · drag pan
-      </div>
-    </div>
-  );
+  return <div ref={box} className={`absolute inset-0 ${theme === "dark" ? "bg-[#0e1117]" : "bg-[#e8eaed]"}`} />;
 }

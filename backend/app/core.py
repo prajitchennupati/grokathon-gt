@@ -146,7 +146,8 @@ class AppState:
             self.on_event(ev)
         new, escalated, resolved = self.alerts.update(eng.aircraft, eng.t, vfr=eng.alert_on_vfr,
                                                       resolve_after=eng.resolve_after_ticks,
-                                                      vertical_ft=eng.vertical_alert_ft)
+                                                      vertical_ft=eng.vertical_alert_ft,
+                                                      lateral_nm=eng.lateral_alert_nm)
         for a in new:
             self.metrics["alerts_raised"] += 1
             self.log("alert", f"{a.severity.upper()} conflict {a.a} / {a.b}: {a.geometry['lateral_nm']} nm, "
@@ -264,16 +265,16 @@ async def live_poll_loop(state: AppState) -> None:
     """Feeds the LiveEngine while live mode is on. Network failures keep the last picture."""
     import httpx
 
-    last_wx = 0.0
     async with httpx.AsyncClient() as client:
         while True:
             eng = state.engine
             if isinstance(eng, LiveEngine):
                 ap = eng.scenario.airport
                 complete = eng.metar.get("metar") and eng.metar.get("taf")
-                if time.time() - last_wx > (METAR_REFRESH_S if complete else 30):
+                # the refresh clock lives on the engine: a fresh live session always fetches first
+                if time.time() - eng.wx_fetched_at > (METAR_REFRESH_S if complete else 30):
                     wx = await feed.fetch_metar_taf(ap.icao, client)
-                    last_wx = time.time()
+                    eng.wx_fetched_at = time.time()
                     if wx:
                         eng.metar = {**eng.metar, **wx}
                         if "wind_dir" in wx:
@@ -282,7 +283,8 @@ async def live_poll_loop(state: AppState) -> None:
                     targets, provider = await feed.fetch(ap.lat, ap.lon, 45, client)
                     if state.engine is eng:
                         eng.update(targets, provider)
-                        if not getattr(state, "_live_briefed", True):
+                        # brief once real weather is in (or after one failed attempt)
+                        if not getattr(state, "_live_briefed", True) and eng.wx_fetched_at:
                             state._live_briefed = True
                             state.bots.trigger("briefing", "shift start (live)")
                 except Exception as e:

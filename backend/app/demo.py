@@ -7,20 +7,20 @@ if TYPE_CHECKING:
     from .core import AppState
 
 STEPS: list[dict[str, Any]] = [
-    {"id": "shift_start", "t": 1, "title": "Shift start → briefing",
+    {"id": "shift_start", "caption": "A new shift starts. The Briefing helper has summed up the weather and airport status.", "t": 1, "title": "Shift start → briefing",
      "say": "Briefing Bot pulled METAR/TAF, NOTAMs, closures and flow restrictions into one page."},
-    {"id": "conflict", "t": 91, "title": "Conflict + approval",
+    {"id": "conflict", "caption": "Two planes are heading for the same spot at the same height. Clearance suggests a fix; the controller approves it.", "t": 91, "title": "Conflict + approval",
      "say": "The deterministic probe flags DAL1423 / SWA2210 two minutes out. Grok explains it and picks a "
             "probe-verified fix. Nothing happens until the controller presses A."},
-    {"id": "weather", "t": 150, "title": "Weather + coordination",
+    {"id": "weather", "caption": "A storm has formed west of the airport. A helper drafted warnings to the neighbouring control centre.", "t": 150, "title": "Weather + coordination",
      "say": "A cell builds over FALCN. Coordination Bot drafts a miles-in-trail request to Atlanta Center. "
             "It sits in the approval queue; approving only simulates the send."},
-    {"id": "relief", "t": 210, "title": "Relief briefing",
+    {"id": "relief", "caption": "Controllers are swapping seats. A helper wrote the handover checklist for the new controller.", "t": 210, "title": "Relief briefing",
      "say": "Relief Bot turns the live picture into a checklist; the incoming controller ACKs each item."},
-    {"id": "popup", "t": 240, "title": "Pop-up VFR (imminent)",
+    {"id": "popup", "caption": "A small plane appeared without warning. There's no safe automatic fix, so Clearance says so.", "t": 240, "title": "Pop-up VFR (imminent)",
      "say": "A VFR target pops up 40 s from DAL2290. No single maneuver passes the probe, so Clearance says "
             "so instead of guessing."},
-    {"id": "shift_end", "t": 355, "title": "End-of-shift paperwork",
+    {"id": "shift_end", "caption": "End of shift. A helper wrote the shift report and an incident report.", "t": 355, "title": "End-of-shift paperwork",
      "say": "Paperwork Bot writes the shift summary and a draft incident report for the imminent conflict. "
             "Export as PDF."},
 ]

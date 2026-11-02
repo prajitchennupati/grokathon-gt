@@ -59,9 +59,10 @@ class AlertManager:
         return next((a for a in self.alerts if a.id == alert_id), None)
 
     def update(self, aircraft: dict[str, Aircraft], t: int, vfr: bool = True,
-               resolve_after: int = RESOLVE_AFTER_TICKS, vertical_ft: float = 1000.0) -> tuple[list[Alert], list[Alert], list[Alert]]:
+               resolve_after: int = RESOLVE_AFTER_TICKS, vertical_ft: float = 1000.0,
+               lateral_nm: float = 3.0) -> tuple[list[Alert], list[Alert], list[Alert]]:
         """Run the probe and advance alert state. Returns (new, escalated, resolved)."""
-        conflicts = {c.key: c for c in probe(aircraft.values(), vfr=vfr, vertical_ft=vertical_ft)}
+        conflicts = {c.key: c for c in probe(aircraft.values(), vfr=vfr, vertical_ft=vertical_ft, lateral_nm=lateral_nm)}
         new, escalated, resolved = [], [], []
         by_key = {a.key: a for a in self.active()}
 

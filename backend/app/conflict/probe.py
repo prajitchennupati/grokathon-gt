@@ -121,7 +121,7 @@ def suppressed(a: Aircraft, b: Aircraft) -> bool:
 
 
 def probe_pair(a: Aircraft, b: Aircraft, maneuver: Optional[Maneuver] = None,
-               horizon: int = LOOKAHEAD_S, vertical_ft: float = VERTICAL_FT) -> Optional[Conflict]:
+               horizon: int = LOOKAHEAD_S, vertical_ft: float = VERTICAL_FT, lateral_nm: float = LATERAL_NM) -> Optional[Conflict]:
     ta = project(a, horizon, maneuver if maneuver and maneuver.callsign == a.callsign else None)
     tb = project(b, horizon, maneuver if maneuver and maneuver.callsign == b.callsign else None)
     t_los = None
@@ -129,7 +129,7 @@ def probe_pair(a: Aircraft, b: Aircraft, maneuver: Optional[Maneuver] = None,
     for t, ((xa, ya, za), (xb, yb, zb)) in enumerate(zip(ta, tb)):
         lat = math.hypot(xa - xb, ya - yb)
         vert = abs(za - zb)
-        if lat < LATERAL_NM and vert < vertical_ft:
+        if lat < lateral_nm and vert < vertical_ft:
             if t_los is None:
                 t_los = t
             if best is None or lat < best[0]:
@@ -149,12 +149,12 @@ def probe_pair(a: Aircraft, b: Aircraft, maneuver: Optional[Maneuver] = None,
 
 
 def probe(aircraft: Iterable[Aircraft], maneuver: Optional[Maneuver] = None, vfr: bool = True,
-          vertical_ft: float = VERTICAL_FT) -> list[Conflict]:
+          vertical_ft: float = VERTICAL_FT, lateral_nm: float = LATERAL_NM) -> list[Conflict]:
     found = []
     for a, b in combinations(sorted((ac for ac in aircraft if not ac.probe_exempt), key=lambda ac: ac.callsign), 2):
         if suppressed(a, b) or (not vfr and "VFR" in (a.flight_rules, b.flight_rules)):
             continue
-        c = probe_pair(a, b, maneuver, vertical_ft=vertical_ft)
+        c = probe_pair(a, b, maneuver, vertical_ft=vertical_ft, lateral_nm=lateral_nm)
         if c is not None:
             found.append(c)
     return found

@@ -35,7 +35,9 @@ def briefing_inputs(state: "AppState") -> dict[str, Any]:
         b.update(
             _note="METAR/TAF and runway flow are LIVE (aviationweather.gov). NOTAMs, closures, equipment and "
                   "TMIs are sample fixture data.",
-            metar=wx["metar"], taf=wx.get("taf") or "TAF unavailable (aviationweather.gov did not respond)", weather_outlook=[],
+            metar=wx["metar"], taf=wx.get("taf") or "", weather_outlook=[],
+            # only real data in live mode: no sample NOTAMs, closures, equipment or TMIs
+            notams=[], runway_closures=[], equipment=[], traffic_management=[],
             flow="East flow" if east else "West flow",
             active_runways={"arrivals": ["8L", "9R", "10"], "departures": ["8R", "9L"]} if east else b["active_runways"],
             sources=[s for s in b["sources"] if "aviationweather" in s["url"]],

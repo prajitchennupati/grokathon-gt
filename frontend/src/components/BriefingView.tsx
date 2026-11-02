@@ -1,7 +1,8 @@
 import { ackItem, fmtT, type BotOutputView } from "../api";
 import { Markdown } from "../markdown";
 
-const VIA: Record<string, string> = { webhook: "Grok Bot", dropbox: "Grok Bot (shared folder)", fallback: "xAI API fallback" };
+const VIA: Record<string, string> = { webhook: "Grok Bot", dropbox: "Grok Bot (shared folder)", fallback: "built-in version (xAI API)" };
+const HELPER: Record<string, string> = { briefing: "Briefing", relief: "Handover", coordination: "Coordination", paperwork: "Paperwork" };
 
 interface Props {
   outputs: BotOutputView[];
@@ -34,15 +35,14 @@ export default function BriefingView({ outputs, selectedId, onSelect, onClose }:
 
       {isRelief && (
         <div className={`px-4 py-2 text-sm font-bold ${allAcked ? "bg-green-800/40 text-green-200" : "bg-cyan-900/30 text-cyan-200"}`}>
-          {allAcked ? "✓ Position handed over" : `Incoming controller: tap ACK on each line (${current.acked.length}/${current.checklist.length})`}
+          {allAcked ? "✓ Handover complete" : `New controller: tap ✓ on each line to confirm you've read it (${current.acked.length}/${current.checklist.length})`}
         </div>
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
         <Markdown source={current.body_markdown} acked={current.acked} onAck={isRelief ? (i) => ackItem(current.id, i) : undefined} />
         <div className="mt-4 border-t border-edge pt-2 text-[11px] text-green-800">
-          Written by the {current.role} Bot via {VIA[current.via] ?? current.via}
-          {current.llm_source === "canned" ? " (built-in template — no Grok key set)" : current.llm_source === "cache" ? " (cached Grok)" : ""} at {fmtT(current.t_sim)}.
+          Written by the {HELPER[current.role] ?? current.role} helper{current.via !== "fallback" ? ` (${VIA[current.via] ?? current.via})` : ""} at {fmtT(current.t_sim)}.
           {current.sources.length > 0 && (
             <> Sources: {current.sources.map((s, i) => (
               <span key={i}>{i > 0 && ", "}<a href={s.url} target="_blank" rel="noreferrer" className="text-cyan-700 underline">{s.title}</a></span>

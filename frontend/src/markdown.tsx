@@ -74,7 +74,7 @@ function render(src: string, opts: Opts): ReactNode[] {
                 onClick={() => opts.onAck?.(idx)}
                 className={`mt-0.5 shrink-0 rounded border px-1 text-[10px] font-bold ${done ? "border-green-600 bg-green-700/40 text-green-200" : "border-cyan-600 text-cyan-300 hover:bg-cyan-900/40"}`}
               >
-                {done ? "✓ ACK" : "ACK"}
+                {done ? "✓" : "☐"}
               </button>
               <span className={done ? "text-green-600" : ""}>{inline(t[2])}</span>
             </li>,

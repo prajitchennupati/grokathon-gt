@@ -69,38 +69,32 @@ def canned_briefing(c: dict[str, Any]) -> BotDraft:
     b = c["inputs"]
     rw = b["active_runways"]
     abnormal = [e for e in b["equipment"] if re.search(r"out of service|U/S|OTS|inop", e, re.I)]
-    live = "LIVE" in b.get("_note", "")
-    watch = [
-        "Convection west of the field after 1800Z: expect deviations and MIT over FALCN."
-        if b["weather_outlook"] else "Watch the TAF for wind shifts that would flip the flow.",
-        "Crane 1.4 nm NE of the 26R approach end, 1,160 ft MSL (lit).",
-        "TWY E closed between D and F: longer taxi-in for 27L arrivals.",
+    watch = []
+    if b["weather_outlook"]:
+        watch.append("Convection west of the field after 1800Z: expect deviations and MIT over FALCN.")
+    if b["runway_closures"]:
+        watch += ["Crane 1.4 nm NE of the 26R approach end, 1,160 ft MSL (lit).",
+                  "TWY E closed between D and F: longer taxi-in for 27L arrivals."]
+    if b["taf"]:
+        watch.append("Watch the forecast for wind shifts that would flip the runway flow.")
+    sections = [
+        f"# {b['airport']} shift briefing",
+        f"## Runways\n**{b['flow']}** — landing **{' / '.join(rw['arrivals'])}**, departing **{' / '.join(rw['departures'])}**",
+        "## Weather\n" + "\n".join(filter(None, [
+            f"- Now: **{_metar_brief(b['metar'])}** — `{b['metar']}`",
+            f"- Forecast: `{b['taf']}`" if b["taf"] else "",
+            _md_list(b["weather_outlook"][:1]) if b["weather_outlook"] else "",
+        ])),
     ]
-    body = f"""# {b['airport']} shift briefing
-
-> {b['_note'] if live else 'Sample data for the offline demo, not live.'}
-
-## Runways
-**{b['flow']}** — landing **{' / '.join(rw['arrivals'])}**, departing **{' / '.join(rw['departures'])}** · AAR {b['airport_acceptance_rate']}
-
-## Weather
-- Now: **{_metar_brief(b['metar'])}** — `{b['metar']}`
-- Forecast: `{b['taf']}`
-{_md_list(b['weather_outlook'][:1]) if b['weather_outlook'] else ''}
-
-## Closures
-{_md_list(b['runway_closures'])}
-
-## Equipment
-{_md_list(abnormal) if abnormal else '- All normal'}
-
-## Flow restrictions
-{_md_list(b['traffic_management'][2:])}
-
-## Watch this shift
-{_md_list(watch)}
-"""
-    return BotDraft(title=f"{b['airport']} shift briefing", body_markdown=body)
+    if b["runway_closures"]:
+        sections.append("## Closures\n" + _md_list(b["runway_closures"]))
+    if b["equipment"]:
+        sections.append("## Equipment\n" + (_md_list(abnormal) if abnormal else "- All normal"))
+    if b["traffic_management"][2:]:
+        sections.append("## Flow restrictions\n" + _md_list(b["traffic_management"][2:]))
+    if watch:
+        sections.append("## Watch this shift\n" + _md_list(watch))
+    return BotDraft(title=f"{b['airport']} shift briefing", body_markdown="\n\n".join(sections) + "\n")
 
 
 def _metar_brief(metar: str) -> str:
@@ -139,8 +133,7 @@ def canned_relief(c: dict[str, Any]) -> BotDraft:
 
 - [ ] **Weather:** {_metar_brief(c['weather']['metar'])}{f'; {cells}' if cells else ''}.
 - [ ] **Runways:** landing {' / '.join(rw['arrivals'])}, departing {' / '.join(rw['departures'])}.
-- [ ] **Equipment:** {'; '.join(abnormal) if abnormal else 'all normal'}.
-- [ ] **Restrictions:** {'; '.join(r.split(' (coordinated')[0] for r in coordinated) if coordinated else 'standing TMIs only'}.
+{f"- [ ] **Equipment:** {'; '.join(abnormal) if abnormal else 'all normal'}.{chr(10)}" if c['equipment'] else ''}- [ ] **Restrictions:** {'; '.join(r.split(' (coordinated')[0] for r in coordinated) if coordinated else 'none coordinated'}.
 - [ ] **Traffic:** {len(tr)} aircraft.{f' Watch: {watch}.' if watch else ''}
 - [ ] **Conflicts:** {alert_txt}.
 - [ ] **Pending:** {f'{n_pend} item(s) awaiting your approval' if n_pend else 'nothing'}.
@@ -172,7 +165,7 @@ def canned_coordination(c: dict[str, Any]) -> BotDraft:
     if not actions:
         lines.append("- No weather cells on the scope; no coordination required.")
     body = "# Weather coordination drafts\n\n## Situation\n" + "\n".join(lines) + \
-           "\n\n## Drafts\nEach message below is in the approval queue. Nothing is sent until approved (simulated)."
+           "\n\n## Drafts\nEach message is waiting for your approval."
     return BotDraft(title="Weather coordination drafts", body_markdown=body, proposed_actions=actions)
 
 
@@ -238,7 +231,7 @@ def canned_incident(c: dict[str, Any], alert: dict[str, Any], specs: dict[str, A
         actions.append("No validated single-aircraft resolution was available; controller action not recorded in the log.")
     body = f"""# Incident report — {a_cs} / {b_cs}
 
-**DRAFT — requires controller review.** Prototype output; not an official FAA report.
+**DRAFT — for controller review.**
 
 ## Summary
 {alert['max_severity'].title()} conflict between {a_cs} and {b_cs} detected {alert['detected']} at {c['facility']}, {c['position']}.
