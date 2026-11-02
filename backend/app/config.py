@@ -27,6 +27,7 @@ class Settings:
         self.public_base_url: str = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
         self.scenario: str = os.getenv("SCENARIO", "atl_arrivals_demo.json")
         self.demo_mode: bool = _flag("DEMO_MODE")
+        self.source: str = os.getenv("TRAFFIC_SOURCE", "scenario")  # scenario | live
         self.db_path: Path = Path(os.getenv("CLEARANCE_DB", str(BACKEND_DIR / "clearance.db")))
         self.scenarios_dir: Path = BACKEND_DIR / "scenarios"
         self.fixtures_dir: Path = BACKEND_DIR / "fixtures"

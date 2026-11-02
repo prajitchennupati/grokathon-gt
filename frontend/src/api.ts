@@ -15,6 +15,8 @@ export interface ScenarioStatic {
   fixes: Fix[];
   sectors: { id: string; name: string; polygon_xy: XY[] }[];
   events: { t: number; kind: string; title: string }[];
+  live?: boolean;
+  flow?: "east" | "west";
 }
 
 export interface AircraftView {
@@ -33,6 +35,8 @@ export interface AircraftView {
   flight_rules: string;
   origin: string;
   destination: string;
+  /** light GA in live mode: drawn dim, not conflict-probed */
+  minor?: boolean;
 }
 
 export interface WeatherView { id: string; title: string; intensity: string; polygon_xy: XY[]; affects_fix: string | null }
@@ -47,6 +51,7 @@ export interface SimSnapshot {
   landed: { callsign: string; runway: string; t: number }[];
   weather: WeatherView[];
   events_fired: { t: number; kind: string; title: string; detail: string }[];
+  live?: { provider: string; error: string; flow: string; age_s: number | null; metar: string };
 }
 
 export interface SuggestionView { callsign: string; action: "climb" | "descend" | "turn" | "speed"; value: number; phraseology: string }
@@ -131,6 +136,7 @@ export interface Snapshot {
     live_timeout_s: number;
   };
   restrictions: string[];
+  source: "scenario" | "live";
   metrics: Record<string, number>;
   demo_mode: boolean;
   auto_pause: boolean;
@@ -148,6 +154,7 @@ export async function api<T = unknown>(path: string, body?: unknown): Promise<T>
 }
 
 export const simControl = (action: string, value?: number) => api("/api/sim/control", { action, value });
+export const setSource = (source: "scenario" | "live") => api("/api/source", { source });
 export const decideApproval = (id: number, decision: "approve" | "decline") => api(`/api/approvals/${id}`, { decision });
 export const runBot = (role: Role, fallback = false) => api(`/api/bots/${role}/run`, { fallback });
 export const setBotMode = (role: Role, mode: "live" | "fallback") => api(`/api/bots/${role}/mode`, { mode });
@@ -198,12 +205,16 @@ export function useSnapshot(): { snap: Snapshot | null; connected: boolean } {
   return { snap, connected };
 }
 
-export function useScenario(): ScenarioStatic | null {
+/** Static map (runways, fixes). Refetched when the traffic source or runway flow changes. */
+export function useScenario(key: string): ScenarioStatic | null {
   const [s, setS] = useState<ScenarioStatic | null>(null);
   useEffect(() => {
-    const load = () => api<ScenarioStatic>("/api/scenario").then(setS).catch(() => window.setTimeout(load, 1000));
+    let alive = true;
+    const load = () =>
+      api<ScenarioStatic>("/api/scenario").then((v) => alive && setS(v)).catch(() => alive && window.setTimeout(load, 1000));
     load();
-  }, []);
+    return () => { alive = false; };
+  }, [key]);
   return s;
 }
 

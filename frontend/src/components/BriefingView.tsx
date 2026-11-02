@@ -1,49 +1,54 @@
 import { ackItem, fmtT, type BotOutputView } from "../api";
 import { Markdown } from "../markdown";
 
-const VIA: Record<string, string> = { webhook: "Grok Bot · webhook", dropbox: "Grok Bot · shared folder", fallback: "Fallback · xAI API" };
-const LLM: Record<string, string> = { grok: "Grok", cache: "cached Grok", canned: "template" };
+const VIA: Record<string, string> = { webhook: "Grok Bot", dropbox: "Grok Bot (shared folder)", fallback: "xAI API fallback" };
 
 interface Props {
   outputs: BotOutputView[];
   selectedId: number | null;
   onSelect: (id: number) => void;
+  onClose: () => void;
 }
 
-export default function BriefingView({ outputs, selectedId, onSelect }: Props) {
+/** Slide-over reader for Bot documents. */
+export default function BriefingView({ outputs, selectedId, onSelect, onClose }: Props) {
   const current = outputs.find((o) => o.id === selectedId) ?? outputs[outputs.length - 1];
-  if (!current) return <div className="p-4 text-xs text-green-800">No Bot output yet. Run the sim — the Briefing Bot reports at shift start.</div>;
+  if (!current) return null;
   const isRelief = current.kind === "relief_briefing" && current.checklist.length > 0;
+  const allAcked = isRelief && current.acked.length === current.checklist.length;
 
   return (
-    <div className="flex h-full min-h-0">
-      <div className="w-56 shrink-0 overflow-y-auto border-r border-edge">
-        {[...outputs].reverse().map((o) => (
-          <button key={o.id} onClick={() => onSelect(o.id)}
-            className={`block w-full border-b border-edge px-2 py-1.5 text-left ${o.id === current.id ? "bg-green-900/30" : "hover:bg-green-950/40"}`}>
-            <div className="truncate text-[11px] font-bold text-green-200">{o.title}</div>
-            <div className="text-[10px] text-green-700">{o.role} · {fmtT(o.t_sim)}</div>
-          </button>
-        ))}
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-2 border-b border-edge px-4 py-2">
+        <select
+          value={current.id}
+          onChange={(e) => onSelect(Number(e.target.value))}
+          className="min-w-0 flex-1 truncate rounded border border-edge bg-black px-2 py-1 text-sm text-green-200"
+        >
+          {[...outputs].reverse().map((o) => <option key={o.id} value={o.id}>{o.title} · {fmtT(o.t_sim)}</option>)}
+        </select>
+        <a className="text-xs text-cyan-400 hover:underline" href={`/api/bots/outputs/${current.id}/export.pdf`}>PDF</a>
+        <a className="text-xs text-cyan-400 hover:underline" href={`/api/bots/outputs/${current.id}/export.md`}>MD</a>
+        <button onClick={onClose} className="ml-1 rounded px-2 text-lg text-green-600 hover:text-white" title="Close (Esc)">✕</button>
       </div>
-      <div className="min-w-0 flex-1 overflow-y-auto p-3">
-        <div className="mb-2 flex flex-wrap items-center gap-2 text-[10px]">
-          <span className="rounded border border-violet-600 px-1 text-violet-300">{VIA[current.via] ?? current.via}{current.llm_source ? ` · ${LLM[current.llm_source] ?? current.llm_source}` : ""}</span>
-          <span className="text-green-700">{fmtT(current.t_sim)}</span>
-          {isRelief && <span className="text-cyan-400">{current.acked.length}/{current.checklist.length} acknowledged</span>}
-          <span className="ml-auto flex gap-2">
-            <a className="text-cyan-400 underline" href={`/api/bots/outputs/${current.id}/export.md`}>Export .md</a>
-            <a className="text-cyan-400 underline" href={`/api/bots/outputs/${current.id}/export.pdf`}>Export .pdf</a>
-          </span>
+
+      {isRelief && (
+        <div className={`px-4 py-2 text-sm font-bold ${allAcked ? "bg-green-800/40 text-green-200" : "bg-cyan-900/30 text-cyan-200"}`}>
+          {allAcked ? "✓ Position handed over" : `Incoming controller: tap ACK on each line (${current.acked.length}/${current.checklist.length})`}
         </div>
+      )}
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
         <Markdown source={current.body_markdown} acked={current.acked} onAck={isRelief ? (i) => ackItem(current.id, i) : undefined} />
-        {current.sources.length > 0 && (
-          <div className="mt-3 border-t border-edge pt-2 text-[10px] text-green-700">
-            Sources: {current.sources.map((s, i) => (
-              <span key={i}>{i > 0 && " · "}{s.url ? <a href={s.url} target="_blank" rel="noreferrer" className="text-cyan-600 underline">{s.title}</a> : s.title}</span>
-            ))}
-          </div>
-        )}
+        <div className="mt-4 border-t border-edge pt-2 text-[11px] text-green-800">
+          Written by the {current.role} Bot via {VIA[current.via] ?? current.via}
+          {current.llm_source === "canned" ? " (built-in template — no Grok key set)" : current.llm_source === "cache" ? " (cached Grok)" : ""} at {fmtT(current.t_sim)}.
+          {current.sources.length > 0 && (
+            <> Sources: {current.sources.map((s, i) => (
+              <span key={i}>{i > 0 && ", "}<a href={s.url} target="_blank" rel="noreferrer" className="text-cyan-700 underline">{s.title}</a></span>
+            ))}</>
+          )}
+        </div>
       </div>
     </div>
   );

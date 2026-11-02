@@ -1,113 +1,78 @@
 import { useState } from "react";
-import { actionableAlerts, decideAlert, fmtT, type AlertView } from "../api";
+import { decideAlert, type AlertView } from "../api";
 
-interface Props {
-  alerts: AlertView[];
-  onFocus: (callsign: string) => void;
-}
+const SOURCE_LABEL: Record<string, string> = { grok: "Grok", cache: "Grok (cached)", canned: "built-in fallback" };
 
-const SOURCE_LABEL: Record<string, string> = { grok: "Grok", cache: "Grok (cached)", canned: "Deterministic fallback" };
+const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
-export default function AlertPanel({ alerts, onFocus }: Props) {
-  const active = actionableAlerts(alerts);
-  const recent = alerts.filter((a) => a.status === "resolved").slice(-3).reverse();
-
-  return (
-    <section className="rounded border border-edge">
-      <div className="flex items-center justify-between border-b border-edge px-3 py-2">
-        <div className="text-xs uppercase tracking-wider text-green-700">Conflict alerts</div>
-        <div className="text-[10px] text-green-800">A approve · D dismiss</div>
-      </div>
-      {active.length === 0 && <div className="px-3 py-3 text-xs text-green-800">No conflicts predicted in the next 120 s.</div>}
-      {active.map((a, i) => <AlertCard key={a.id} alert={a} top={i === 0} onFocus={onFocus} />)}
-      {recent.length > 0 && (
-        <div className="border-t border-edge px-3 py-2">
-          {recent.map((a) => (
-            <div key={a.id} className="text-[11px] text-green-800">
-              {fmtT(a.resolved_t ?? 0)} resolved {a.a}/{a.b}
-              {a.decision ? ` · ${a.decision}` : ""}
-              {a.min_sep ? ` · closest ${a.min_sep.lateral_nm} nm / ${a.min_sep.vertical_ft} ft` : ""}
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function AlertCard({ alert: a, top, onFocus }: { alert: AlertView; top: boolean; onFocus: (cs: string) => void }) {
+/** One conflict, reduced to what a controller needs at a glance. */
+export function AlertCard({ alert: a, live, onFocus }: { alert: AlertView; live: boolean; onFocus: (cs: string) => void }) {
+  const [why, setWhy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const imminent = a.severity === "imminent";
-  const decide = (d: "approve" | "dismiss") => decideAlert(a.id, d).then(() => setErr(null)).catch((e) => setErr(String(e.message)));
   const s = a.advisory?.suggestion;
-  const showSuggestion = a.advisory_state === "ready" && a.suggestion_valid && s;
+  const ready = a.advisory_state === "ready";
+  const valid = ready && a.suggestion_valid && !!s;
+  const decide = (d: "approve" | "dismiss") => decideAlert(a.id, d).then(() => setErr(null)).catch((e) => setErr(String(e.message)));
 
   return (
-    <div className={`border-b border-edge p-3 ${a.decision ? "bg-red-950/30" : imminent ? "alert-flash" : "bg-red-950/60"}`}>
+    <div className={`rounded-lg border-2 p-4 ${imminent && !a.decision ? "alert-flash border-red-500" : "border-red-700 bg-red-950/50"}`}>
       <div className="flex items-center gap-2">
-        <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${imminent ? "bg-red-500 text-black" : "bg-amber-500 text-black"}`}>
-          {a.severity.toUpperCase()}
+        <span className={`rounded px-2 py-0.5 text-xs font-bold text-black ${imminent ? "bg-red-500" : "bg-amber-400"}`}>
+          {imminent ? "IMMINENT" : "CONFLICT"}
         </span>
-        <button className="font-bold text-red-300 hover:underline" onClick={() => onFocus(a.a)}>{a.a}</button>
-        <span className="text-red-400">×</span>
-        <button className="font-bold text-red-300 hover:underline" onClick={() => onFocus(a.b)}>{a.b}</button>
-        {top && !a.decision && <span className="ml-auto text-[10px] text-red-300">TOP</span>}
+        <button className="text-lg font-bold text-white hover:underline" onClick={() => onFocus(a.a)}>{a.a}</button>
+        <span className="text-red-400">⇄</span>
+        <button className="text-lg font-bold text-white hover:underline" onClick={() => onFocus(a.b)}>{a.b}</button>
       </div>
-      <div className="mt-1 text-[11px] text-red-200">
-        CPA {a.geometry.t_cpa}s · {a.geometry.lateral_nm} nm · {a.geometry.vertical_ft} ft
-        {a.geometry.t_los > 0 ? ` · LoS in ${a.geometry.t_los}s` : " · LOSS OF SEPARATION"}
+      <div className="mt-1 text-sm text-red-200">
+        {a.geometry.lateral_nm} nm · {a.geometry.vertical_ft} ft apart in {mmss(a.geometry.t_cpa)}
       </div>
 
-      {a.advisory_state === "pending" ? (
-        <div className="mt-2 animate-pulse text-xs text-cyan-300">Grok is analysing the conflict…</div>
+      {a.decision ? (
+        <div className="mt-3 text-base font-bold text-green-400">
+          {a.decision === "approved" ? (live ? "✓ Logged as issued" : "✓ Approved — pilot complying") : "✕ Dismissed"}
+        </div>
+      ) : !ready ? (
+        <div className="mt-3 animate-pulse text-base text-cyan-300">Grok is thinking…</div>
+      ) : valid ? (
+        <>
+          <div className="mt-3 text-lg font-bold leading-snug text-cyan-200">“{s!.phraseology}”</div>
+          <div className="mt-3 flex gap-2">
+            <button onClick={() => decide("approve")}
+              className="flex-1 rounded-md bg-green-600 py-2.5 text-base font-bold text-black hover:bg-green-500">
+              ✓ {live ? "Log as issued" : "Approve"} <kbd className="ml-1 text-xs opacity-60">A</kbd>
+            </button>
+            <button onClick={() => decide("dismiss")}
+              className="rounded-md border-2 border-red-500 px-4 py-2.5 text-base font-bold text-red-300 hover:bg-red-900/50">
+              ✕ <kbd className="ml-1 text-xs opacity-60">D</kbd>
+            </button>
+          </div>
+        </>
       ) : (
         <>
-          {a.advisory && (
-            <div className="mt-2 text-xs text-white">
-              <span className="mr-1 text-[10px] text-red-400">@{fmtT(a.created_t)}</span>
-              {a.advisory.summary}
-            </div>
-          )}
-          {showSuggestion ? (
-            <div className="mt-2 rounded border border-cyan-700 bg-black/60 p-2">
-              <div className="text-[10px] uppercase tracking-wider text-cyan-600">Suggested · probe-verified</div>
-              <div className="mt-1 text-sm font-bold text-cyan-200">“{s.phraseology}”</div>
-              <div className="mt-1 text-[11px] text-cyan-500">{a.advisory?.rationale}</div>
-            </div>
-          ) : (
-            <div className="mt-2 rounded border border-amber-700 bg-black/60 p-2 text-xs text-amber-300">
-              No validated suggestion{a.validation_note ? ` — ${a.validation_note}` : ""}.
-            </div>
-          )}
-          <div className="mt-1 text-[10px] text-green-800">
-            {SOURCE_LABEL[a.advisory_source] ?? a.advisory_source}
-            {a.advisory_error ? ` · ${a.advisory_error}` : ""}
-          </div>
+          <div className="mt-3 text-base font-bold text-amber-300">No safe single fix found — issue a traffic alert.</div>
+          <button onClick={() => decide("dismiss")}
+            className="mt-3 w-full rounded-md border-2 border-amber-600 py-2 text-sm font-bold text-amber-300 hover:bg-amber-900/40">
+            Acknowledge <kbd className="ml-1 text-xs opacity-60">D</kbd>
+          </button>
         </>
       )}
 
-      {a.decision ? (
-        <div className="mt-2 text-xs font-bold text-green-400">
-          {a.decision === "approved" ? "✓ APPROVED — pilot complying" : "✗ DISMISSED"} at {fmtT(a.decision_t ?? 0)} · monitoring
-        </div>
-      ) : (
-        <div className="mt-2 flex gap-2">
-          <button
-            disabled={!showSuggestion}
-            onClick={() => decide("approve")}
-            className="flex-1 rounded border border-green-500 bg-green-600/20 py-1 text-xs font-bold text-green-300 hover:bg-green-600/40 disabled:opacity-30"
-          >
-            Approve (A)
-          </button>
-          <button
-            onClick={() => decide("dismiss")}
-            className="flex-1 rounded border border-red-500 py-1 text-xs font-bold text-red-300 hover:bg-red-900/40"
-          >
-            Dismiss (D)
-          </button>
+      {ready && a.advisory && (
+        <button onClick={() => setWhy(!why)} className="mt-2 text-xs text-green-700 hover:text-green-400">{why ? "▾" : "▸"} Why?</button>
+      )}
+      {why && a.advisory && (
+        <div className="mt-1 space-y-1 text-xs text-green-300/80">
+          <p>{a.advisory.summary}</p>
+          <p>{a.advisory.rationale}</p>
+          <p className="text-green-800">
+            Source: {SOURCE_LABEL[a.advisory_source] ?? a.advisory_source}. Every suggestion is checked by the conflict probe before it is shown.
+            {live && " Live traffic: approving only records the decision."}
+          </p>
         </div>
       )}
-      {err && <div className="mt-1 text-[11px] text-amber-400">{err}</div>}
+      {err && <div className="mt-1 text-xs text-amber-400">{err}</div>}
     </div>
   );
 }

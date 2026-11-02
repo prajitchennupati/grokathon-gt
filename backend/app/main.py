@@ -16,7 +16,7 @@ from .bots import context as bot_context
 from .bots.export import to_pdf
 from .bots.service import watch_dropbox
 from .config import settings
-from .core import AppState, sim_loop
+from .core import AppState, live_poll_loop, sim_loop
 from .models import ROLES, BotPost
 
 state = AppState()
@@ -24,7 +24,10 @@ state = AppState()
 
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI):
-    tasks = [asyncio.create_task(sim_loop(state)), asyncio.create_task(watch_dropbox(state.bots))]
+    tasks = [asyncio.create_task(sim_loop(state)), asyncio.create_task(watch_dropbox(state.bots)),
+             asyncio.create_task(live_poll_loop(state))]
+    if settings.source == "live":
+        state.set_source("live")
     yield
     for t in tasks:
         t.cancel()
@@ -42,6 +45,18 @@ def health() -> dict[str, Any]:
 @app.get("/api/scenario")
 def scenario() -> dict[str, Any]:
     return state.engine.static_view()
+
+
+class SourceBody(BaseModel):
+    source: Literal["scenario", "live"]
+
+
+@app.post("/api/source")
+async def set_source(body: SourceBody) -> dict[str, Any]:
+    """Switch between the scripted demo scenario and real ADS-B traffic."""
+    state.set_source(body.source)
+    await state.push()
+    return {"source": state.source}
 
 
 @app.get("/api/state")
@@ -109,6 +124,8 @@ async def instruction(body: Instruction) -> dict[str, Any]:
         text = state.manual_instruction(body.callsign, body.action, body.value)
     except KeyError:
         raise HTTPException(404, f"{body.callsign} not on scope")
+    except PermissionError as e:
+        raise HTTPException(409, str(e))
     await state.push()
     return {"phraseology": text}
 

@@ -12,6 +12,8 @@ from .config import settings
 from .bots.service import TRIGGERS, BotService
 from .conflict.alerts import Alert, AlertManager
 from .conflict.probe import Maneuver, validate_maneuver
+from .live import feed
+from .live.engine import LiveEngine, is_east_flow
 from .llm import advisory, phraseology
 from .sim.engine import FiredEvent, SimEngine
 from .sim.scenario import load_scenario
@@ -39,7 +41,9 @@ class Hub:
 
 class AppState:
     def __init__(self, store: Optional[Store] = None) -> None:
-        self.engine = SimEngine(load_scenario(settings.scenarios_dir / settings.scenario))
+        self.base_scenario = load_scenario(settings.scenarios_dir / settings.scenario)
+        self.engine: SimEngine = SimEngine(self.base_scenario)
+        self.source = "scenario"  # scenario | live
         self.store = store or Store(settings.db_path)
         self.alerts = AlertManager()
         self.hub = Hub()
@@ -84,17 +88,38 @@ class AppState:
                 "bot_tasks_completed": sum(b["tasks_completed"] for b in bots["roster"]),
                 "minutes_saved": sum(self.bots.minutes_saved.values()),
             },
+            "source": self.source,
             "demo_mode": settings.demo_mode,
             "auto_pause": self.auto_pause,
             "llm": {"enabled": settings.llm_enabled, "offline": settings.offline, "model": settings.xai_model or None},
         }
+
+    # ---- traffic source ----------------------------------------------------
+    @property
+    def live(self) -> bool:
+        return isinstance(self.engine, LiveEngine)
+
+    def set_source(self, source: str) -> None:
+        if source == self.source:
+            return
+        for t in list(self._tasks):
+            t.cancel()
+        self.source = source
+        self.engine = LiveEngine(self.base_scenario) if source == "live" else SimEngine(self.base_scenario)
+        self.engine.running = source == "live"
+        self.restart()
+        if source == "live":
+            self.engine.running = True
+            self._deferred = []
+            self._live_briefed = False
+        self.log("sim", "Switched to LIVE traffic (adsb.lol / OpenSky)" if source == "live" else "Switched to demo scenario")
 
     # ---- sim lifecycle -----------------------------------------------------
     def restart(self) -> None:
         for t in list(self._tasks):
             t.cancel()
         self.engine.reset()
-        self.engine.running = False
+        self.engine.running = self.live
         self.alerts.reset()
         self.store.new_run()
         self.bots.reset()
@@ -119,7 +144,9 @@ class AppState:
         fired = eng.tick()
         for ev in deferred + fired:
             self.on_event(ev)
-        new, escalated, resolved = self.alerts.update(eng.aircraft, eng.t)
+        new, escalated, resolved = self.alerts.update(eng.aircraft, eng.t, vfr=eng.alert_on_vfr,
+                                                      resolve_after=eng.resolve_after_ticks,
+                                                      vertical_ft=eng.vertical_alert_ft)
         for a in new:
             self.metrics["alerts_raised"] += 1
             self.log("alert", f"{a.severity.upper()} conflict {a.a} / {a.b}: {a.geometry['lateral_nm']} nm, "
@@ -187,7 +214,8 @@ class AppState:
             ac = self.engine.aircraft.get(s["callsign"])
             if ac is None:
                 raise ValueError(f"{s['callsign']} no longer on scope")
-            self.engine.apply_action(s["callsign"], s["action"], float(s["value"]))
+            if not self.live:  # live traffic is real: Clearance only records the decision
+                self.engine.apply_action(s["callsign"], s["action"], float(s["value"]))
             a.decision, a.decision_t = "approved", self.engine.t
             a.timeline.append({"t": self.engine.t, "event": f"controller approved: {s['phraseology']}"})
             self.metrics["suggestions_approved"] += 1
@@ -205,6 +233,8 @@ class AppState:
         ac = self.engine.aircraft.get(callsign)
         if ac is None:
             raise KeyError(callsign)
+        if self.live:
+            raise PermissionError("live traffic cannot be controlled")
         text = phraseology.instruction(callsign, action, value, ac.heading, ac.alt_ft, ac.gs_kt)
         self.engine.apply_action(callsign, action, value)
         self.log("instruction", text, actor="controller", callsign=callsign, action=action, value=value)
@@ -224,3 +254,41 @@ async def sim_loop(state: AppState) -> None:
             if state._dirty:
                 await state.push()
             await asyncio.sleep(0.1)
+
+
+LIVE_POLL_S = 5.0
+METAR_REFRESH_S = 600.0
+
+
+async def live_poll_loop(state: AppState) -> None:
+    """Feeds the LiveEngine while live mode is on. Network failures keep the last picture."""
+    import httpx
+
+    last_wx = 0.0
+    async with httpx.AsyncClient() as client:
+        while True:
+            eng = state.engine
+            if isinstance(eng, LiveEngine):
+                ap = eng.scenario.airport
+                complete = eng.metar.get("metar") and eng.metar.get("taf")
+                if time.time() - last_wx > (METAR_REFRESH_S if complete else 30):
+                    wx = await feed.fetch_metar_taf(ap.icao, client)
+                    last_wx = time.time()
+                    if wx:
+                        eng.metar = {**eng.metar, **wx}
+                        if "wind_dir" in wx:
+                            eng.east_flow = is_east_flow(wx.get("wind_dir"), wx.get("wind_kt"))
+                try:
+                    targets, provider = await feed.fetch(ap.lat, ap.lon, 45, client)
+                    if state.engine is eng:
+                        eng.update(targets, provider)
+                        if not getattr(state, "_live_briefed", True):
+                            state._live_briefed = True
+                            state.bots.trigger("briefing", "shift start (live)")
+                except Exception as e:
+                    eng.error = str(e)[:200]
+                    log.warning("live feed failed: %s", e)
+                await state.push()
+                await asyncio.sleep(LIVE_POLL_S)
+            else:
+                await asyncio.sleep(0.5)

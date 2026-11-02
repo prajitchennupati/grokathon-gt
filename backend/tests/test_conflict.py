@@ -91,8 +91,8 @@ def test_beyond_lookahead_is_clear():
 
 
 def test_parallel_finals_to_different_runways_suppressed():
-    a = mk("A1", 8, 0.8, 270, gs=160, alt=3500, route=["RW26R"], land="26R")
-    b = mk("B1", 8, -0.3, 270, gs=160, alt=3500, route=["RW27L"], land="27L")
+    a = mk("A1", 14, 0.8, 270, gs=180, alt=5500, route=["RW26R"], land="26R")
+    b = mk("B1", 14, -0.3, 270, gs=180, alt=5500, route=["RW27L"], land="27L")
     assert probe([a, b]) == []
     b.land, b.route = "26R", ["RW26R"]  # same runway: not suppressed
     assert len(probe([a, b])) == 1
@@ -159,3 +159,12 @@ def test_alert_lifecycle_new_escalate_resolve():
         _, _, res = mgr.update(acs, t)
     assert res and mgr.alerts[0].status == "resolved"
     assert mgr.alerts[0].min_sep["lateral_nm"] == 8
+
+
+def test_terminal_area_low_traffic_suppressed():
+    # two departures side by side off parallel runways, 4 nm out at 3,000 ft
+    a = mk("A1", -4, 0.8, 270, gs=200, alt=3000)
+    b = mk("B1", -4, -0.3, 270, gs=200, alt=3000)
+    assert probe([a, b]) == []
+    a.alt_ft = a.tgt_alt_ft = b.alt_ft = b.tgt_alt_ft = 6000  # above the suppression ceiling
+    assert len(probe([a, b])) == 1

@@ -8,6 +8,7 @@ live Grok Bot posts to the inbox.
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING, Any
 
 from ..llm.client import structured
@@ -30,7 +31,8 @@ proposed_actions: [] (a briefing proposes nothing).""",
     "relief": COMMON + """
 Task: a position relief briefing for the incoming controller, formatted as a checklist they acknowledge
 item by item. Every item MUST be a Markdown task line starting with "- [ ] " followed by a bold label, e.g.
-"- [ ] **Traffic:** 11 aircraft ...". Cover, in order: Weather, Runways & flow, Equipment, Restrictions in effect,
+"- [ ] **Traffic:** 11 aircraft ...". Keep every item under 20 words: decode the METAR (wind, visibility),
+list only abnormal equipment, group notable aircraft by reason. Cover, in order: Weather, Runways & flow, Equipment, Restrictions in effect,
 Traffic (count + notable aircraft: vectors, VFR, weather-affected, low fuel/requests if any),
 Active conflicts/alerts, Pending approvals/requests. Nothing outside the checklist except one # title line.
 proposed_actions: [].""",
@@ -66,72 +68,84 @@ def _md_list(items: list[str]) -> str:
 def canned_briefing(c: dict[str, Any]) -> BotDraft:
     b = c["inputs"]
     rw = b["active_runways"]
-    body = f"""# {b['airport']} shift briefing — {b['valid_for']}
+    abnormal = [e for e in b["equipment"] if re.search(r"out of service|U/S|OTS|inop", e, re.I)]
+    live = "LIVE" in b.get("_note", "")
+    watch = [
+        "Convection west of the field after 1800Z: expect deviations and MIT over FALCN."
+        if b["weather_outlook"] else "Watch the TAF for wind shifts that would flip the flow.",
+        "Crane 1.4 nm NE of the 26R approach end, 1,160 ft MSL (lit).",
+        "TWY E closed between D and F: longer taxi-in for 27L arrivals.",
+    ]
+    body = f"""# {b['airport']} shift briefing
 
-> Source data: bundled sample fixture (offline demo), not live.
+> {b['_note'] if live else 'Sample data for the offline demo, not live.'}
 
-## Active runways & flow
-- **{b['flow']}** — landing **{', '.join(rw['arrivals'])}**, departing **{', '.join(rw['departures'])}**
-- Airport acceptance rate **{b['airport_acceptance_rate']}**
+## Runways
+**{b['flow']}** — landing **{' / '.join(rw['arrivals'])}**, departing **{' / '.join(rw['departures'])}** · AAR {b['airport_acceptance_rate']}
 
-## Weather & trends
-- METAR: `{b['metar']}`
-- TAF: `{b['taf']}`
-{_md_list(b['weather_outlook'])}
+## Weather
+- Now: **{_metar_brief(b['metar'])}** — `{b['metar']}`
+- Forecast: `{b['taf']}`
+{_md_list(b['weather_outlook'][:1]) if b['weather_outlook'] else ''}
 
-## Closures & NOTAMs
+## Closures
 {_md_list(b['runway_closures'])}
-{_md_list(b['notams'])}
 
 ## Equipment
-{_md_list(b['equipment'])}
+{_md_list(abnormal) if abnormal else '- All normal'}
 
 ## Flow restrictions
-{_md_list(b['traffic_management'])}
+{_md_list(b['traffic_management'][2:])}
 
-## Items to watch
-- Convection forecast west of the field after 1800Z (TAF TEMPO TSRA 20-23Z): expect deviations and possible MIT over the west gate (FALCN).
-- Crane 1.4 nm NE of the RWY 26R approach end, 1,160 ft MSL — lit and flagged.
-- TWY E closure between D and F: expect longer taxi-in for 27L arrivals.
+## Watch this shift
+{_md_list(watch)}
 """
     return BotDraft(title=f"{b['airport']} shift briefing", body_markdown=body)
 
 
+def _metar_brief(metar: str) -> str:
+    """'KATL 021452Z 27009KT 10SM ...' -> 'wind 270 at 9 kt, vis 10 SM'."""
+    import re
+
+    wind = re.search(r"\b(\d{3}|VRB)(\d{2,3})(G\d{2,3})?KT\b", metar)
+    vis = re.search(r"\b(\d{1,2}|P6)SM\b", metar)
+    parts = []
+    if wind:
+        parts.append(f"wind {wind.group(1)} at {int(wind.group(2))} kt" + (f" gusting {wind.group(3)[1:]}" if wind.group(3) else ""))
+    if vis:
+        parts.append(f"vis {vis.group(1).replace('P6', '6+')} SM")
+    return ", ".join(parts) or metar
+
+
 def canned_relief(c: dict[str, Any]) -> BotDraft:
     tr = c["traffic"]
-    notable = []
+    groups: dict[str, list[str]] = {}
     for a in tr:
-        tags = []
-        if a["rules"] == "VFR":
-            tags.append("VFR")
-        if a["on_vector"]:
-            tags.append(f"on vector hdg {a['heading']:03d}")
-        if a["runway"] and a["next_fix"] == f"RW{a['runway']}":
-            tags.append(f"on final {a['runway']}")
-        elif a["assigned"] != a["altitude"]:
-            tags.append(f"{a['altitude']}→{a['assigned']}")
-        cells = [w for w in c["weather"]["cells"] if a["callsign"] in w["arrivals_routed_through_affected_fix"]]
-        if cells:
-            tags.append(f"routed via {cells[0]['affects_fix']} (weather)")
-        if tags:
-            notable.append(f"{a['callsign']} ({a['type']}, {a['position']}): {', '.join(tags)}")
+        if any(a["callsign"] in w["arrivals_routed_through_affected_fix"] for w in c["weather"]["cells"]):
+            groups.setdefault("routed into weather", []).append(a["callsign"])
+        elif a["rules"] == "VFR":
+            groups.setdefault("VFR", []).append(a["callsign"])
+        elif a["on_vector"]:
+            groups.setdefault("on vectors", []).append(a["callsign"])
+    watch = "; ".join(f"{', '.join(cs)} ({why})" for why, cs in groups.items())
+    cells = "; ".join(f"{w['intensity']} cell {w['center']}" for w in c["weather"]["cells"])
+    abnormal = [e for e in c["equipment"] if re.search(r"out of service|U/S|OTS|inop", e, re.I)]
+    coordinated = [r for r in c["restrictions_in_effect"] if "coordinated" in r]
     alerts = c["active_alerts"]
-    alert_txt = "; ".join(
-        f"{'/'.join(a['pair'])} {a['max_severity']}" + (f", {a['decision']}" if a["decision"] else ", awaiting decision")
-        for a in alerts) or "None"
-    pend = "; ".join(f"{p['role']}: {p.get('summary', '')}" for p in c["pending_approvals"]) or "None"
-    cells = "; ".join(f"{w['intensity'].title()} cell {w['center']} near {w['affects_fix']}, moving {w['moving']}" for w in c["weather"]["cells"])
-    body = f"""# Position relief briefing — {c['position']} ({c['sim_time']})
+    alert_txt = "; ".join("/".join(a["pair"]) + f" ({a['max_severity']})" for a in alerts) or "none"
+    n_pend = len(c["pending_approvals"])
+    rw = c["active_runways"]
+    body = f"""# Relief briefing — {c['sim_time']}
 
-- [ ] **Weather:** `{c['weather']['metar']}`{f'. {cells}' if cells else '. No significant weather on the scope.'}
-- [ ] **Runways & flow:** landing {', '.join(c['active_runways']['arrivals'])}, departing {', '.join(c['active_runways']['departures'])}.
-- [ ] **Equipment:** {'; '.join(c['equipment'])}.
-- [ ] **Restrictions in effect:** {'; '.join(r.rstrip('.') for r in c['restrictions_in_effect']) or 'None'}.
-- [ ] **Traffic:** {len(tr)} aircraft on frequency/scope. {(' Notable: ' + '; '.join(notable) + '.') if notable else ''}
-- [ ] **Active conflicts/alerts:** {alert_txt}.
-- [ ] **Pending approvals/requests:** {pend}.
+- [ ] **Weather:** {_metar_brief(c['weather']['metar'])}{f'; {cells}' if cells else ''}.
+- [ ] **Runways:** landing {' / '.join(rw['arrivals'])}, departing {' / '.join(rw['departures'])}.
+- [ ] **Equipment:** {'; '.join(abnormal) if abnormal else 'all normal'}.
+- [ ] **Restrictions:** {'; '.join(r.split(' (coordinated')[0] for r in coordinated) if coordinated else 'standing TMIs only'}.
+- [ ] **Traffic:** {len(tr)} aircraft.{f' Watch: {watch}.' if watch else ''}
+- [ ] **Conflicts:** {alert_txt}.
+- [ ] **Pending:** {f'{n_pend} item(s) awaiting your approval' if n_pend else 'nothing'}.
 """
-    return BotDraft(title="Position relief briefing", body_markdown=body)
+    return BotDraft(title="Relief briefing", body_markdown=body)
 
 
 def canned_coordination(c: dict[str, Any]) -> BotDraft:

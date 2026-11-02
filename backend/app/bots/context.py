@@ -22,8 +22,25 @@ ADJACENT_FACILITIES = [
 
 
 @lru_cache(maxsize=1)
-def briefing_inputs() -> dict[str, Any]:
+def _fixture() -> dict[str, Any]:
     return json.loads((settings.fixtures_dir / "briefing_inputs.json").read_text())
+
+
+def briefing_inputs(state: "AppState") -> dict[str, Any]:
+    """Sample fixture, with the real METAR/TAF and runway flow swapped in when live."""
+    b = dict(_fixture())
+    wx = getattr(state.engine, "metar", None)
+    if wx and wx.get("metar"):
+        east = getattr(state.engine, "east_flow", False)
+        b.update(
+            _note="METAR/TAF and runway flow are LIVE (aviationweather.gov). NOTAMs, closures, equipment and "
+                  "TMIs are sample fixture data.",
+            metar=wx["metar"], taf=wx.get("taf") or "TAF unavailable (aviationweather.gov did not respond)", weather_outlook=[],
+            flow="East flow" if east else "West flow",
+            active_runways={"arrivals": ["8L", "9R", "10"], "departures": ["8R", "9L"]} if east else b["active_runways"],
+            sources=[s for s in b["sources"] if "aviationweather" in s["url"]],
+        )
+    return b
 
 
 def _fmt_alt(ft: float) -> str:
@@ -91,9 +108,9 @@ def for_role(state: "AppState", role: str) -> dict[str, Any]:
         "sim_time": f"T+{eng.t}s", "advisory_only": "Prototype: every action is simulated and needs controller approval.",
     }
     if role == "briefing":
-        return {**common, "inputs": briefing_inputs()}
+        return {**common, "inputs": briefing_inputs(state)}
     if role == "relief":
-        b = briefing_inputs()
+        b = briefing_inputs(state)
         return {
             **common,
             "traffic": traffic(state),

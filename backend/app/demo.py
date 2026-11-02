@@ -30,6 +30,7 @@ async def run_step(state: "AppState", step_id: str) -> dict[str, Any]:
     step = next((s for s in STEPS if s["id"] == step_id), None)
     if step is None:
         raise KeyError(step_id)
+    state.set_source("scenario")  # the script only exists in the demo scenario
     if step_id == "shift_start" or state.engine.t > step["t"]:
         state.restart()  # re-running an earlier beat replays the shift from the start
     if state.engine.t < step["t"]:

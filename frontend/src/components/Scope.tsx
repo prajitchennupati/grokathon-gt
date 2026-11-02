@@ -35,7 +35,16 @@ export default function Scope({ scenario, sim, selected, onSelect, conflicts = [
   const trails = useRef<Map<string, XY[]>>(new Map());
   const lastT = useRef<number>(-1);
   const [size, setSize] = useState({ w: 800, h: 600 });
-  const [view, setView] = useState({ scale: 11, cx: 2, cy: 2 }); // px per nm, center in nm
+  const [view, setView] = useState({ scale: 11, cx: 0, cy: 0 }); // px per nm, center in nm
+  const fitted = useRef(false);
+
+  // fit ~32 nm around the airport the first time the pane has a real size
+  const userMoved = useRef(false);
+  useEffect(() => {
+    if (userMoved.current || size.w < 100 || size.h < 100) return;
+    fitted.current = true;
+    setView({ scale: Math.min(size.w, size.h) / 64, cx: 0, cy: 0 });
+  }, [size.w, size.h]);
   const drag = useRef<{ x: number; y: number; cx: number; cy: number; moved: boolean } | null>(null);
   const [, setBlink] = useState(0);
 
@@ -71,7 +80,8 @@ export default function Scope({ scenario, sim, selected, onSelect, conflicts = [
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
-    return () => ro.disconnect();
+    window.addEventListener("resize", measure);
+    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
   }, []);
 
   const toPx = (x: number, y: number): XY => [size.w / 2 + (x - view.cx) * view.scale, size.h / 2 - (y - view.cy) * view.scale];
@@ -91,7 +101,7 @@ export default function Scope({ scenario, sim, selected, onSelect, conflicts = [
   function draw(g: CanvasRenderingContext2D) {
     g.fillStyle = "#000";
     g.fillRect(0, 0, size.w, size.h);
-    g.font = "11px var(--font-mono), monospace";
+    g.font = "12px var(--font-mono), monospace";
     g.textBaseline = "middle";
 
     // sectors
@@ -173,16 +183,27 @@ export default function Scope({ scenario, sim, selected, onSelect, conflicts = [
       g.closePath();
       g.stroke();
       g.fillStyle = C.fix;
+      g.font = "10px var(--font-mono), monospace";
       g.fillText(f.id, px + 6, py);
+      g.font = "12px var(--font-mono), monospace";
     }
 
     // targets
     const conflictSet = new Set(conflicts);
-    for (const a of sim.aircraft) drawTarget(g, a, conflictSet.has(a.callsign));
+    // minor traffic first so airliners' data blocks draw on top
+    const ordered = [...sim.aircraft].sort((a, b) => Number(!!b.minor) - Number(!!a.minor));
+    for (const a of ordered) drawTarget(g, a, conflictSet.has(a.callsign));
   }
 
   function drawTarget(g: CanvasRenderingContext2D, a: AircraftView, inConflict: boolean) {
     const sel = a.callsign === selected;
+    if (a.minor && !sel && !inConflict) {
+      // light GA in live mode: a dim dot, no data block
+      const [mx, my] = toPx(a.x, a.y);
+      g.fillStyle = "rgba(57,255,122,0.35)";
+      g.fillRect(mx - 2, my - 2, 4, 4);
+      return;
+    }
     const flash = inConflict && Math.floor(Date.now() / 500) % 2 === 0;
     const color = inConflict ? C.conflict : sel ? C.select : a.flight_rules === "VFR" ? C.vfr : C.target;
     const [px, py] = toPx(a.x, a.y);
@@ -256,6 +277,7 @@ export default function Scope({ scenario, sim, selected, onSelect, conflicts = [
         style={{ width: size.w, height: size.h }}
         className="absolute left-0 top-0 cursor-crosshair"
         onWheel={(e) => {
+          userMoved.current = true;
           const [nx, ny] = toNm(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
           const scale = Math.min(60, Math.max(3, view.scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
           // zoom about the cursor
@@ -267,6 +289,7 @@ export default function Scope({ scenario, sim, selected, onSelect, conflicts = [
           if (!d) return;
           const dx = e.clientX - d.x, dy = e.clientY - d.y;
           if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true;
+          if (d.moved) userMoved.current = true;
           if (d.moved) setView((v) => ({ ...v, cx: d.cx - dx / v.scale, cy: d.cy + dy / v.scale }));
         }}
         onMouseUp={(e) => {
@@ -276,8 +299,8 @@ export default function Scope({ scenario, sim, selected, onSelect, conflicts = [
         }}
         onMouseLeave={() => { drag.current = null; }}
       />
-      <div className="pointer-events-none absolute bottom-2 right-3 text-[10px] text-green-800">
-        {scenario.airport.icao} · rings {RING_NM} nm · scroll to zoom · drag to pan · click a target
+      <div className="pointer-events-none absolute bottom-2 right-3 text-[10px] text-green-900">
+        rings {RING_NM} nm · scroll zoom · drag pan
       </div>
     </div>
   );

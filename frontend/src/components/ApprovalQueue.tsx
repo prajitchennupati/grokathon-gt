@@ -1,49 +1,24 @@
-import { decideApproval, fmtT, type ApprovalView } from "../api";
+import { decideApproval, type ApprovalView } from "../api";
 
-const TYPE_LABEL: Record<string, string> = { send_message: "MESSAGE", file_report: "REPORT" };
-
-export default function ApprovalQueue({ approvals, onOpen }: { approvals: ApprovalView[]; onOpen: (outputId: number) => void }) {
-  const pending = approvals.filter((a) => a.status === "pending");
-  const decided = approvals.filter((a) => a.status !== "pending").slice(-4).reverse();
-
+/** One Bot action waiting for the controller. */
+export function ApprovalCard({ approval: a }: { approval: ApprovalView }) {
+  const message = a.action.type === "send_message";
   return (
-    <section className="rounded border border-edge">
-      <div className="flex items-center justify-between border-b border-edge px-3 py-2">
-        <div className="text-xs uppercase tracking-wider text-green-700">Approval queue</div>
-        {pending.length > 0 && <span className="rounded bg-amber-500 px-1.5 text-[10px] font-bold text-black">{pending.length}</span>}
+    <div className="rounded-lg border-2 border-violet-700 bg-violet-950/40 p-4">
+      <div className="text-xs font-bold uppercase tracking-wider text-violet-300">
+        {message ? `☏ Message to ${a.action.to ?? "facility"}` : a.action.type === "file_report" ? "✎ File report" : a.action.summary}
       </div>
-      {pending.length === 0 && <div className="px-3 py-3 text-xs text-green-800">Nothing waiting. Bot actions appear here and do nothing until approved.</div>}
-      {pending.map((a) => (
-        <div key={a.id} className="border-b border-edge p-3">
-          <div className="flex items-center gap-2 text-[10px]">
-            <span className="rounded border border-violet-500 px-1 font-bold text-violet-300">{TYPE_LABEL[a.action.type] ?? a.action.type.toUpperCase()}</span>
-            <span className="text-green-700">{a.role} · {fmtT(a.t_sim)}</span>
-            <button className="ml-auto text-cyan-500 hover:underline" onClick={() => onOpen(a.output_id)}>context</button>
-          </div>
-          <div className="mt-1 text-xs font-bold text-white">{a.action.summary}</div>
-          {a.action.to && <div className="text-[11px] text-green-500">To: {a.action.to}</div>}
-          {a.action.body && <div className="mt-1 rounded bg-black/60 p-2 text-[11px] text-green-200">{a.action.body}</div>}
-          <div className="mt-2 flex gap-2">
-            <button onClick={() => decideApproval(a.id, "approve")}
-              className="flex-1 rounded border border-green-500 bg-green-600/20 py-1 text-xs font-bold text-green-300 hover:bg-green-600/40">
-              Approve{a.action.type === "send_message" ? " & send (sim)" : ""}
-            </button>
-            <button onClick={() => decideApproval(a.id, "decline")}
-              className="flex-1 rounded border border-red-500 py-1 text-xs font-bold text-red-300 hover:bg-red-900/40">
-              Decline
-            </button>
-          </div>
-        </div>
-      ))}
-      {decided.length > 0 && (
-        <div className="px-3 py-2">
-          {decided.map((a) => (
-            <div key={a.id} className="text-[11px] text-green-800">
-              {fmtT(a.decided_t_sim ?? 0)} {a.status === "approved" ? (a.action.type === "send_message" ? "✓ sent (simulated)" : "✓ approved") : "✗ declined"} — {a.action.summary}
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
+      <div className="mt-2 text-sm leading-snug text-white">{a.action.body || a.action.summary}</div>
+      <div className="mt-3 flex gap-2">
+        <button onClick={() => decideApproval(a.id, "approve")}
+          className="flex-1 rounded-md bg-violet-500 py-2 text-sm font-bold text-black hover:bg-violet-400">
+          {message ? "Send" : "Approve"}
+        </button>
+        <button onClick={() => decideApproval(a.id, "decline")}
+          className="rounded-md border-2 border-violet-700 px-4 py-2 text-sm font-bold text-violet-300 hover:bg-violet-900/50">
+          Skip
+        </button>
+      </div>
+    </div>
   );
 }

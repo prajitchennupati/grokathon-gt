@@ -33,6 +33,9 @@ class FiredEvent:
 
 class SimEngine:
     SPEEDS = (1, 2, 4)
+    alert_on_vfr = True  # scripted scenarios include a VFR pop-up conflict
+    resolve_after_ticks = 3
+    vertical_alert_ft = 1000.0
 
     def __init__(self, scenario: Scenario) -> None:
         self.scenario = scenario
@@ -198,6 +201,7 @@ class SimEngine:
             "flight_rules": ac.flight_rules,
             "origin": ac.origin,
             "destination": ac.destination,
+            "minor": ac.probe_exempt,
         }
 
     def static_view(self) -> dict[str, Any]:

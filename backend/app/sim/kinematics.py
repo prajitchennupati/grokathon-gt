@@ -42,6 +42,7 @@ class Aircraft:
     landed: bool = False
     origin: str = ""
     destination: str = ""
+    probe_exempt: bool = False  # e.g. light GA in live mode: shown, but not conflict-probed
 
     @property
     def next_fix(self) -> Optional[str]:

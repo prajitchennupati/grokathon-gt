@@ -1,168 +1,199 @@
 import { useEffect, useRef, useState } from "react";
 import Scope from "./components/Scope";
-import AlertPanel from "./components/AlertPanel";
-import ShiftLog from "./components/ShiftLog";
+import { AlertCard } from "./components/AlertPanel";
+import { ApprovalCard } from "./components/ApprovalQueue";
 import BotRoster from "./components/BotRoster";
-import ApprovalQueue from "./components/ApprovalQueue";
 import BriefingView from "./components/BriefingView";
-import MetricsStrip from "./components/MetricsStrip";
-import DemoScript from "./components/DemoScript";
-import { actionableAlerts, decideAlert, fmtT, simControl, useScenario, useSnapshot, type Snapshot } from "./api";
+import ShiftLog from "./components/ShiftLog";
+import MetricsStrip, { minutesAssumptions } from "./components/MetricsStrip";
+import DemoStepper from "./components/DemoStepper";
+import { actionableAlerts, decideAlert, fmtT, setSource, simControl, useScenario, useSnapshot, type Snapshot } from "./api";
+
+type Drawer = null | "doc" | "log";
 
 export default function App() {
-  const scenario = useScenario();
   const { snap, connected } = useSnapshot();
+  const live = snap?.source === "live";
+  const scenario = useScenario(`${snap?.source ?? ""}:${snap?.sim.live?.flow ?? ""}`);
   const [selected, setSelected] = useState<string | null>(null);
-  const [tab, setTab] = useState<"outputs" | "log">("log");
+  const [drawer, setDrawer] = useState<Drawer>(null);
   const [outputId, setOutputId] = useState<number | null>(null);
-  const [showDemo, setShowDemo] = useState<boolean | null>(null); // null = follow backend demo mode
+  const nextStep = useRef<(() => void) | null>(null);
   const sim = snap?.sim;
   const outputs = snap?.bots.outputs ?? [];
 
-  // surface each new Bot output as it arrives
+  // pop each new Bot document open as it arrives, unless it's only approval items
+  // (those already show as cards on the right)
   const seenOutputs = useRef(0);
   useEffect(() => {
     if (outputs.length > seenOutputs.current) {
-      setOutputId(outputs[outputs.length - 1].id);
-      setTab("outputs");
+      const fresh = outputs.slice(seenOutputs.current).filter((o) => o.kind !== "coordination_drafts");
+      if (fresh.length) {
+        setOutputId(fresh[fresh.length - 1].id);
+        setDrawer("doc");
+      }
     }
     seenOutputs.current = outputs.length;
   }, [outputs.length]);
 
-  const openOutput = (id: number) => { setOutputId(id); setTab("outputs"); };
-  const openRole = (role: string) => {
-    const o = [...outputs].reverse().find((x) => x.role === role);
-    if (o) openOutput(o.id);
-  };
+  // a new conflict takes priority over any open document: clear the radar
+  const activeAlertIds = (snap?.alerts ?? []).filter((a) => a.status === "active").map((a) => a.id);
+  const newestAlert = activeAlertIds.length ? Math.max(...activeAlertIds) : 0;
+  useEffect(() => {
+    if (newestAlert) setDrawer(null);
+  }, [newestAlert]);
 
-  // keyboard shortcuts read the latest snapshot through a ref
+  // keyboard: Space pause · A approve · D dismiss · N next demo step · Esc close
   const snapRef = useRef<Snapshot | null>(null);
   snapRef.current = snap;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.metaKey || e.ctrlKey || e.altKey) return;
       const top = actionableAlerts(snapRef.current?.alerts ?? []).find((a) => !a.decision);
-      if (e.code === "Space") {
-        e.preventDefault();
-        simControl("toggle");
-      } else if (e.key === "a" || e.key === "A") {
-        if (top?.suggestion_valid) decideAlert(top.id, "approve").catch(() => {});
-      } else if (e.key === "d" || e.key === "D") {
-        if (top) decideAlert(top.id, "dismiss").catch(() => {});
-      }
+      if (e.code === "Space") { e.preventDefault(); simControl("toggle"); }
+      else if (e.key === "a" || e.key === "A") { if (top?.suggestion_valid) decideAlert(top.id, "approve").catch(() => {}); }
+      else if (e.key === "d" || e.key === "D") { if (top) decideAlert(top.id, "dismiss").catch(() => {}); }
+      else if (e.key === "n" || e.key === "N") nextStep.current?.();
+      else if (e.key === "Escape") setDrawer(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const sel = sim?.aircraft.find((a) => a.callsign === selected);
+  // decided alerts linger a few seconds so the presenter sees the outcome, then leave
+  const alerts = actionableAlerts(snap?.alerts ?? []).filter((a) => !a.decision || (sim && a.decision_t !== null && sim.t - a.decision_t < 8));
+  const approvals = (snap?.bots.approvals ?? []).filter((a) => a.status === "pending");
   const conflictCallsigns = (snap?.alerts ?? []).filter((a) => a.status === "active").flatMap((a) => [a.a, a.b]);
+  const sel = sim?.aircraft.find((a) => a.callsign === selected);
+  const openRole = (role: string) => {
+    const o = [...outputs].reverse().find((x) => x.role === role);
+    if (o) { setOutputId(o.id); setDrawer("doc"); }
+  };
 
   return (
-    <div className="flex h-full flex-col bg-black text-[13px]">
+    <div className="flex h-full flex-col bg-black text-sm">
+      {/* ---------------------------------------------------------------- header */}
       <header className="flex items-center gap-4 border-b border-edge bg-panel px-4 py-2">
-        <div className="text-lg font-bold tracking-widest text-target">CLEARANCE</div>
-        <div className="text-xs text-green-600">{scenario ? `${scenario.facility} · ${scenario.position}` : "…"}</div>
-        <div className="mx-auto rounded border border-amber-500 bg-amber-500/10 px-3 py-1 text-xs font-bold tracking-wider text-amber-400">
-          ADVISORY PROTOTYPE — NOT FOR OPERATIONAL USE
+        <div className="text-lg font-bold tracking-[0.2em] text-target">CLEARANCE</div>
+
+        <div className="flex overflow-hidden rounded-md border border-edge text-xs font-bold">
+          {(["scenario", "live"] as const).map((src) => (
+            <button key={src} onClick={() => setSource(src)}
+              className={`px-3 py-1.5 ${snap?.source === src ? (src === "live" ? "bg-red-600 text-white" : "bg-target text-black") : "text-green-600 hover:text-green-300"}`}>
+              {src === "live" ? "● LIVE ATL" : "DEMO"}
+            </button>
+          ))}
         </div>
-        {snap && (
-          <div className="text-[10px] text-green-700">
-            LLM: {snap.llm.offline ? "offline (cache)" : snap.llm.enabled ? snap.llm.model : "no key — fallbacks"}
+
+        {sim && (
+          <div className="flex items-center gap-2">
+            {!live && (
+              <button onClick={() => simControl(sim.running ? "pause" : "resume")}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-green-900 text-target hover:bg-green-800" title="Space">
+                {sim.running ? "❚❚" : "▶"}
+              </button>
+            )}
+            <span className="text-xl font-bold tabular-nums text-target">{live ? new Date().toUTCString().slice(17, 22) + "Z" : fmtT(sim.t)}</span>
           </div>
         )}
-        <button onClick={() => setShowDemo(!(showDemo ?? snap?.demo_mode))} className="text-[10px] text-amber-500 hover:underline">
-          Demo script
-        </button>
-        <div className={`text-xs ${connected ? "text-green-500" : "text-red-500"}`}>{connected ? "● LIVE" : "○ RECONNECTING"}</div>
+
+        {snap && snap.metrics.minutes_saved > 0 && (
+          <div className="text-xs text-green-500" title={`Assumed manual effort — ${minutesAssumptions(snap)}`}>
+            ⏱ <b className="text-target">{snap.metrics.minutes_saved}</b> min saved
+          </div>
+        )}
+
+        <div className="ml-auto flex items-center gap-3">
+          <button onClick={() => setDrawer(drawer === "log" ? null : "log")} className="text-xs text-green-600 hover:text-green-300">Log</button>
+          <span className="rounded border border-amber-600/70 px-2 py-0.5 text-[10px] font-bold tracking-wider text-amber-400">
+            ADVISORY PROTOTYPE — NOT FOR OPERATIONAL USE
+          </span>
+          {!connected && <span className="text-xs text-red-500">○ reconnecting</span>}
+        </div>
       </header>
-      {snap && <MetricsStrip snap={snap} />}
 
       <div className="flex min-h-0 flex-1">
-        {sim && (showDemo ?? snap?.demo_mode) && <DemoScript t={sim.t} onClose={() => setShowDemo(false)} />}
-        <main className="flex min-w-0 flex-1 flex-col">
-          <div className="relative min-h-0 flex-1">
-            {scenario && sim ? (
-              <Scope scenario={scenario} sim={sim} selected={selected} onSelect={setSelected} conflicts={conflictCallsigns} />
-            ) : (
-              <div className="p-8 text-green-700">Connecting to backend…</div>
-            )}
-          </div>
-          <div className="flex h-[40%] min-h-[220px] flex-col border-t border-edge bg-panel">
-            <div className="flex gap-1 border-b border-edge px-2 pt-1 text-xs">
-              {([["outputs", `Bot outputs (${outputs.length})`], ["log", "Shift log"]] as const).map(([k, label]) => (
-                <button key={k} onClick={() => setTab(k)}
-                  className={`rounded-t border border-b-0 px-3 py-1 ${tab === k ? "border-edge bg-black text-target" : "border-transparent text-green-700 hover:text-green-400"}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="min-h-0 flex-1">
-              {tab === "log" ? <ShiftLog log={snap?.log ?? []} /> : <BriefingView outputs={outputs} selectedId={outputId} onSelect={setOutputId} />}
-            </div>
-          </div>
-        </main>
-
-        <aside className="flex w-[400px] flex-col gap-3 overflow-y-auto border-l border-edge bg-panel p-3">
-          {sim && (
-            <section className="rounded border border-edge p-3">
-              <div className="flex items-baseline justify-between">
-                <div className="text-2xl font-bold text-target">{fmtT(sim.t)}</div>
-                <div className="text-xs text-green-700">of {fmtT(sim.duration_s)} · {sim.aircraft.length} tracks</div>
-              </div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <Btn onClick={() => simControl(sim.running ? "pause" : "resume")}>{sim.running ? "❚❚ Pause" : "▶ Run"}</Btn>
-                <Btn onClick={() => simControl("restart")}>⟲ Restart</Btn>
-                {[1, 2, 4].map((s) => (
-                  <Btn key={s} active={sim.speed === s} onClick={() => simControl("speed", s)}>{s}x</Btn>
-                ))}
-                <Btn active={snap?.auto_pause} onClick={() => simControl("auto_pause", snap?.auto_pause ? 0 : 1)}>Auto-pause</Btn>
-              </div>
-              <div className="mt-2 h-1 w-full bg-edge">
-                <div className="h-1 bg-target" style={{ width: `${(sim.t / sim.duration_s) * 100}%` }} />
-              </div>
-            </section>
+        {/* ---------------------------------------------------------------- scope */}
+        <main className="relative min-w-0 flex-1">
+          {scenario && sim ? (
+            <Scope scenario={scenario} sim={sim} selected={selected} onSelect={setSelected} conflicts={conflictCallsigns} />
+          ) : (
+            <div className="p-8 text-green-700">Connecting…</div>
           )}
 
-          <AlertPanel alerts={snap?.alerts ?? []} onFocus={setSelected} />
-          <ApprovalQueue approvals={snap?.bots.approvals ?? []} onOpen={openOutput} />
-          <BotRoster roster={snap?.bots.roster ?? []} onOpen={openRole} />
-
-          <section className="rounded border border-edge p-3">
-            <div className="mb-1 text-xs uppercase tracking-wider text-green-700">Selected</div>
-            {sel ? (
-              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-                <div className="col-span-2 text-base font-bold text-select">{sel.callsign} <span className="text-green-600">{sel.type}</span></div>
-                <div>ALT {sel.alt_ft} ft</div><div>ASSIGNED {sel.tgt_alt_ft}</div>
-                <div>HDG {Math.round(sel.heading)}°</div><div>GS {sel.gs_kt} kt</div>
-                <div>VS {sel.vs_fpm} fpm</div><div>{sel.vector ? "ON VECTOR" : `→ ${sel.next_fix ?? "—"}`}</div>
-                <div>{sel.origin} → {sel.destination}</div><div>{sel.land ? `RWY ${sel.land}` : sel.flight_rules}</div>
+          {/* top-left: what am I looking at */}
+          {sim && (
+            <div className="pointer-events-none absolute left-3 top-3 space-y-2">
+              <div className="rounded bg-black/70 px-2 py-1 text-xs text-green-500">
+                {live
+                  ? <>Real traffic · {sim.aircraft.length} aircraft · {sim.live?.flow} flow · {sim.live?.provider || "connecting…"}{sim.live?.error && <span className="text-amber-400"> · feed error, showing last picture</span>}</>
+                  : <>Demo scenario · {sim.aircraft.length} aircraft · west flow</>}
               </div>
-            ) : (
-              <div className="text-xs text-green-800">Click a target on the scope.</div>
+              {sel && (
+                <div className="pointer-events-auto w-56 rounded border border-select/50 bg-black/85 p-2 text-xs">
+                  <div className="flex items-center">
+                    <span className="text-base font-bold text-select">{sel.callsign}</span>
+                    <span className="ml-2 text-green-600">{sel.type}</span>
+                    <button onClick={() => setSelected(null)} className="ml-auto text-green-700 hover:text-white">✕</button>
+                  </div>
+                  <div className="mt-1 grid grid-cols-2 gap-x-2 text-green-200">
+                    <span>{sel.alt_ft.toLocaleString()} ft</span><span>{sel.gs_kt} kt</span>
+                    <span>hdg {String(Math.round(sel.heading)).padStart(3, "0")}°</span>
+                    <span>{sel.vs_fpm > 300 ? "climbing" : sel.vs_fpm < -300 ? "descending" : "level"}</span>
+                    {sel.land && <span className="col-span-2 text-green-500">on final {sel.land}</span>}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* bottom-center: one-button demo */}
+          {sim && !live && (
+            <div className="pointer-events-none absolute bottom-4 left-4 z-20">
+              <DemoStepper t={sim.t} nextRef={nextStep} onStep={() => setDrawer(null)} />
+            </div>
+          )}
+
+          {/* slide-over drawers */}
+          {drawer && snap && (
+            <div className="absolute inset-y-0 right-0 z-10 w-[min(520px,85%)] border-l border-edge bg-panel shadow-2xl">
+              {drawer === "doc" && outputs.length > 0 ? (
+                <BriefingView outputs={outputs} selectedId={outputId} onSelect={setOutputId} onClose={() => setDrawer(null)} />
+              ) : (
+                <div className="flex h-full flex-col">
+                  <div className="flex items-center border-b border-edge px-4 py-2">
+                    <span className="text-sm font-bold text-green-300">Shift log</span>
+                    <button onClick={() => setDrawer(null)} className="ml-auto text-lg text-green-600 hover:text-white">✕</button>
+                  </div>
+                  <MetricsStrip snap={snap} />
+                  <div className="min-h-0 flex-1"><ShiftLog log={snap.log} /></div>
+                </div>
+              )}
+            </div>
+          )}
+        </main>
+
+        {/* ---------------------------------------------------------------- right: only what needs you */}
+        <aside className="flex w-[380px] shrink-0 flex-col border-l border-edge bg-panel">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+            <div className="text-xs font-bold uppercase tracking-widest text-green-700">Needs you</div>
+            {alerts.map((a) => <AlertCard key={a.id} alert={a} live={live} onFocus={setSelected} />)}
+            {approvals.map((a) => <ApprovalCard key={a.id} approval={a} />)}
+            {alerts.length === 0 && approvals.length === 0 && (
+              <div className="rounded-lg border border-dashed border-green-900 p-6 text-center">
+                <div className="text-3xl text-green-700">✓</div>
+                <div className="mt-1 text-base font-bold text-green-500">All clear</div>
+                <div className="mt-1 text-xs text-green-800">Alerts and Bot requests appear here.</div>
+              </div>
             )}
-          </section>
+          </div>
+          <div className="border-t border-edge p-2">
+            <div className="px-2 pb-1 text-xs font-bold uppercase tracking-widest text-green-700">Bots</div>
+            <BotRoster roster={snap?.bots.roster ?? []} hasOutput={(r) => outputs.some((o) => o.role === r)} onOpen={openRole} />
+          </div>
         </aside>
       </div>
     </div>
-  );
-}
-
-export function Btn({ children, onClick, active, danger, disabled }: {
-  children: React.ReactNode; onClick?: () => void; active?: boolean; danger?: boolean; disabled?: boolean;
-}) {
-  return (
-    <button
-      disabled={disabled}
-      onClick={onClick}
-      className={`rounded border px-2 py-1 text-xs font-bold transition disabled:opacity-40 ${
-        danger ? "border-red-600 text-red-400 hover:bg-red-900/40"
-        : active ? "border-target bg-target/20 text-target"
-        : "border-edge text-green-400 hover:border-target hover:text-target"
-      }`}
-    >
-      {children}
-    </button>
   );
 }

@@ -58,9 +58,10 @@ class AlertManager:
     def get(self, alert_id: int) -> Optional[Alert]:
         return next((a for a in self.alerts if a.id == alert_id), None)
 
-    def update(self, aircraft: dict[str, Aircraft], t: int) -> tuple[list[Alert], list[Alert], list[Alert]]:
+    def update(self, aircraft: dict[str, Aircraft], t: int, vfr: bool = True,
+               resolve_after: int = RESOLVE_AFTER_TICKS, vertical_ft: float = 1000.0) -> tuple[list[Alert], list[Alert], list[Alert]]:
         """Run the probe and advance alert state. Returns (new, escalated, resolved)."""
-        conflicts = {c.key: c for c in probe(aircraft.values())}
+        conflicts = {c.key: c for c in probe(aircraft.values(), vfr=vfr, vertical_ft=vertical_ft)}
         new, escalated, resolved = [], [], []
         by_key = {a.key: a for a in self.active()}
 
@@ -93,7 +94,7 @@ class AlertManager:
             if alert.key in conflicts:
                 continue
             alert._missing += 1
-            if alert._missing >= RESOLVE_AFTER_TICKS or a is None or b is None:
+            if alert._missing >= resolve_after or a is None or b is None:
                 alert.status, alert.resolved_t = "resolved", t
                 alert.timeline.append({"t": t, "event": "conflict resolved"})
                 resolved.append(alert)

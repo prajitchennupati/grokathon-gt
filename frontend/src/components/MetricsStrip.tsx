@@ -8,29 +8,30 @@ const LABELS: Record<string, string> = {
   incident_report: "incident report draft",
 };
 
+export function minutesAssumptions(snap: Snapshot): string {
+  return Object.entries(snap.bots.minutes_assumptions).map(([k, v]) => `${LABELS[k] ?? k}: ${v} min`).join(" · ");
+}
+
+/** The four session numbers, with the minutes-saved assumptions spelled out. */
 export default function MetricsStrip({ snap }: { snap: Snapshot }) {
   const m = snap.metrics;
-  const assumptions = Object.entries(snap.bots.minutes_assumptions)
-    .map(([k, v]) => `${LABELS[k] ?? k}: ${v} min`)
-    .join(" · ");
   const tiles = [
-    ["Alerts raised", m.alerts_raised],
-    ["Suggestions approved", m.suggestions_approved],
-    ["Bot tasks completed", m.bot_tasks_completed],
-    ["Est. controller minutes saved*", m.minutes_saved],
+    ["Alerts", m.alerts_raised],
+    ["Approved", m.suggestions_approved],
+    ["Bot tasks", m.bot_tasks_completed],
+    ["Minutes saved*", m.minutes_saved],
   ] as const;
-
   return (
-    <div className="flex items-center gap-6 border-b border-edge bg-black px-4 py-1.5">
-      {tiles.map(([label, value]) => (
-        <div key={label} className="flex items-baseline gap-2">
-          <span className="text-lg font-bold tabular-nums text-target">{value ?? 0}</span>
-          <span className="text-[10px] uppercase tracking-wider text-green-700">{label}</span>
-        </div>
-      ))}
-      <div className="ml-auto max-w-[45%] truncate text-[10px] text-green-800" title={assumptions}>
-        *Assumed manual effort per task — {assumptions}
+    <div className="border-b border-edge px-4 py-3">
+      <div className="grid grid-cols-4 gap-2">
+        {tiles.map(([label, value]) => (
+          <div key={label} className="rounded border border-edge p-2 text-center">
+            <div className="text-2xl font-bold tabular-nums text-target">{value ?? 0}</div>
+            <div className="text-[10px] uppercase tracking-wider text-green-700">{label}</div>
+          </div>
+        ))}
       </div>
+      <div className="mt-2 text-[10px] leading-snug text-green-800">*Assumed manual effort per task — {minutesAssumptions(snap)}</div>
     </div>
   );
 }

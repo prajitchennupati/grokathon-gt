@@ -9,9 +9,11 @@ Severity follows the time of closest point of approach within the conflict:
   imminent  -> CPA in < 60 s
   predicted -> CPA in 60-120 s
 
-Pairs where both aircraft are established on final to *different* runways are
-suppressed (simultaneous parallel approaches), mirroring a conflict-alert
-suppression area at a real facility.
+Suppressed pairs, mirroring conflict-alert suppression areas at a real facility:
+  - both established on final to *different* runways (simultaneous parallels);
+  - both inside TERMINAL_NM of the airport and below TERMINAL_CEILING_FT
+    (parallel approaches/departures, where tower separation applies);
+  - both VFR (no separation standard applies between VFR aircraft).
 """
 from __future__ import annotations
 
@@ -27,6 +29,8 @@ LOOKAHEAD_S = 120
 LATERAL_NM = 3.0
 VERTICAL_FT = 1000.0
 IMMINENT_S = 60
+TERMINAL_NM = 10.0  # approach/departure suppression area around the airport...
+TERMINAL_CEILING_FT = 5000.0  # ...below this altitude (MSL)
 
 
 @dataclass
@@ -104,12 +108,20 @@ def _on_final(ac: Aircraft) -> bool:
     return ac.land is not None and bool(ac.route) and ac.next_fix == ac.route[-1]
 
 
+def _in_terminal_area(ac: Aircraft) -> bool:
+    return math.hypot(ac.x, ac.y) < TERMINAL_NM and ac.alt_ft < TERMINAL_CEILING_FT
+
+
 def suppressed(a: Aircraft, b: Aircraft) -> bool:
-    return _on_final(a) and _on_final(b) and a.land != b.land
+    if _on_final(a) and _on_final(b) and a.land != b.land:
+        return True
+    if a.flight_rules == "VFR" and b.flight_rules == "VFR":
+        return True
+    return _in_terminal_area(a) and _in_terminal_area(b)
 
 
 def probe_pair(a: Aircraft, b: Aircraft, maneuver: Optional[Maneuver] = None,
-               horizon: int = LOOKAHEAD_S) -> Optional[Conflict]:
+               horizon: int = LOOKAHEAD_S, vertical_ft: float = VERTICAL_FT) -> Optional[Conflict]:
     ta = project(a, horizon, maneuver if maneuver and maneuver.callsign == a.callsign else None)
     tb = project(b, horizon, maneuver if maneuver and maneuver.callsign == b.callsign else None)
     t_los = None
@@ -117,7 +129,7 @@ def probe_pair(a: Aircraft, b: Aircraft, maneuver: Optional[Maneuver] = None,
     for t, ((xa, ya, za), (xb, yb, zb)) in enumerate(zip(ta, tb)):
         lat = math.hypot(xa - xb, ya - yb)
         vert = abs(za - zb)
-        if lat < LATERAL_NM and vert < VERTICAL_FT:
+        if lat < LATERAL_NM and vert < vertical_ft:
             if t_los is None:
                 t_los = t
             if best is None or lat < best[0]:
@@ -136,12 +148,13 @@ def probe_pair(a: Aircraft, b: Aircraft, maneuver: Optional[Maneuver] = None,
     )
 
 
-def probe(aircraft: Iterable[Aircraft], maneuver: Optional[Maneuver] = None) -> list[Conflict]:
+def probe(aircraft: Iterable[Aircraft], maneuver: Optional[Maneuver] = None, vfr: bool = True,
+          vertical_ft: float = VERTICAL_FT) -> list[Conflict]:
     found = []
-    for a, b in combinations(sorted(aircraft, key=lambda ac: ac.callsign), 2):
-        if suppressed(a, b):
+    for a, b in combinations(sorted((ac for ac in aircraft if not ac.probe_exempt), key=lambda ac: ac.callsign), 2):
+        if suppressed(a, b) or (not vfr and "VFR" in (a.flight_rules, b.flight_rules)):
             continue
-        c = probe_pair(a, b, maneuver)
+        c = probe_pair(a, b, maneuver, vertical_ft=vertical_ft)
         if c is not None:
             found.append(c)
     return found
