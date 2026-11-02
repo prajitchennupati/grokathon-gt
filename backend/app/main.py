@@ -3,23 +3,31 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
+import secrets
+from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from .bots import context as bot_context
+from .bots.export import to_pdf
+from .bots.service import watch_dropbox
 from .config import settings
 from .core import AppState, sim_loop
+from .models import ROLES, BotPost
 
 state = AppState()
 
 
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI):
-    task = asyncio.create_task(sim_loop(state))
+    tasks = [asyncio.create_task(sim_loop(state)), asyncio.create_task(watch_dropbox(state.bots))]
     yield
-    task.cancel()
+    for t in tasks:
+        t.cancel()
 
 
 app = FastAPI(title="Clearance", lifespan=lifespan)
@@ -65,7 +73,7 @@ async def sim_control(body: SimControl) -> dict[str, Any]:
     elif body.action == "seek":
         if body.value is None:
             raise HTTPException(400, "seek needs value")
-        state.seek(body.value)
+        await state.seek(body.value)
     elif body.action == "auto_pause":
         state.auto_pause = bool(body.value)
     await state.push()
@@ -117,3 +125,123 @@ async def ws_endpoint(ws: WebSocket) -> None:
         pass
     finally:
         state.hub.clients.discard(ws)
+
+
+# ---------------------------------------------------------------------------
+# Bots
+# ---------------------------------------------------------------------------
+
+
+def _role(role: str) -> str:
+    if role not in ROLES:
+        raise HTTPException(404, f"unknown role {role}; expected one of {', '.join(ROLES)}")
+    return role
+
+
+def require_token(x_clearance_token: Optional[str] = Header(default=None)) -> None:
+    """Runs before body validation, so unauthenticated callers never see schema errors."""
+    if not x_clearance_token or not secrets.compare_digest(x_clearance_token, settings.token):
+        raise HTTPException(401, "missing or invalid X-Clearance-Token")
+
+
+@app.post("/api/bots/{role}/inbox", status_code=201, dependencies=[Depends(require_token)])
+async def bot_inbox(role: str, post: BotPost) -> dict[str, Any]:
+    """Grok Bots post finished work here. Proposed actions land in the approval queue."""
+    if post.role != _role(role):
+        raise HTTPException(422, f"body role {post.role!r} does not match URL role {role!r}")
+    out = state.bots.ingest(post, via="webhook")
+    await state.push()
+    return {"ok": True, "output_id": out.id, "approvals_created": len(post.proposed_actions)}
+
+
+@app.get("/api/bots/{role}/context", dependencies=[Depends(require_token)])
+def bot_context_endpoint(role: str) -> dict[str, Any]:
+    """What a live Grok Bot needs to do its job (sim picture, shift log, ...)."""
+    return bot_context.for_role(state, _role(role))
+
+
+class BotRun(BaseModel):
+    fallback: bool = False  # true = skip the live Grok Bot and run the xAI fallback now
+
+
+@app.post("/api/bots/{role}/run")
+async def bot_run(role: str, body: BotRun = BotRun()) -> dict[str, Any]:
+    _role(role)
+    if body.fallback:
+        state.bots.run_fallback_now(role)
+    else:
+        state.bots.trigger(role, "requested by controller")
+    await state.push()
+    return {"ok": True}
+
+
+class BotMode(BaseModel):
+    mode: Literal["live", "fallback"]
+
+
+@app.post("/api/bots/{role}/mode")
+async def bot_mode(role: str, body: BotMode) -> dict[str, Any]:
+    state.bots.roster.bots[_role(role)].mode = body.mode
+    state.log("bot", f"{role.title()} Bot switched to {'Grok Bot (live)' if body.mode == 'live' else 'Fallback (xAI API)'}",
+              actor="controller")
+    await state.push()
+    return {"ok": True}
+
+
+class ApprovalDecision(BaseModel):
+    decision: Literal["approve", "decline"]
+
+
+@app.post("/api/approvals/{approval_id}")
+async def approval_decision(approval_id: int, body: ApprovalDecision) -> dict[str, Any]:
+    try:
+        a = state.bots.decide(approval_id, body.decision)
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+    await state.push()
+    return a.model_dump()
+
+
+class Ack(BaseModel):
+    item: int
+
+
+@app.post("/api/bots/outputs/{output_id}/ack")
+async def ack_item(output_id: int, body: Ack) -> dict[str, Any]:
+    try:
+        out = state.bots.ack(output_id, body.item)
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    await state.push()
+    return {"ok": True, "acked": out.acked}
+
+
+@app.get("/api/bots/outputs/{output_id}/export.{fmt}")
+def export_output(output_id: int, fmt: Literal["md", "pdf"]) -> Response:
+    out = state.store.output(output_id)
+    if out is None:
+        raise HTTPException(404, "no such output")
+    stamp = datetime.fromtimestamp(out.ts, timezone.utc).strftime("%Y-%m-%d %H:%MZ")
+    footer = (f"Generated by Clearance {out.role} Bot via {out.via}{'/' + out.llm_source if out.llm_source else ''} "
+              f"at {stamp} (sim T+{out.t_sim}s). Advisory prototype - not for operational use.")
+    name = re.sub(r"[^a-z0-9]+", "-", out.title.lower()).strip("-") or "report"
+    if fmt == "md":
+        body = f"> ADVISORY PROTOTYPE — NOT FOR OPERATIONAL USE\n\n{out.body_markdown}\n\n---\n_{footer}_\n"
+        return Response(body, media_type="text/markdown",
+                        headers={"Content-Disposition": f'attachment; filename="{name}.md"'})
+    return Response(to_pdf(out.title, out.body_markdown, footer), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{name}.pdf"'})
+
+
+@app.get("/api/grokbot/{role}.md")
+def grokbot_instructions(role: str) -> Response:
+    """The paste-in instructions for a Grok Bot with this deployment's URLs filled in.
+    The token stays a placeholder: share it with your teammate out of band."""
+    from .config import REPO_DIR
+
+    folder = REPO_DIR / "grokbot"
+    text = (folder / f"{_role(role)}.md").read_text() + "\n" + (folder / "_common.md").read_text().split("-->", 1)[-1]
+    text = text.replace("{{PUBLIC_BASE_URL}}", settings.public_base_url).replace("{{ROLE}}", role)
+    return Response(text, media_type="text/markdown")

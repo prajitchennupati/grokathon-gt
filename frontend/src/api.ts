@@ -75,11 +75,62 @@ export interface AlertView {
 
 export interface LogEntry { id: number; t_sim: number; ts: number; kind: string; actor: string; message: string; data: Record<string, unknown> }
 
+export type Role = "briefing" | "relief" | "coordination" | "paperwork";
+
+export interface BotView {
+  role: Role;
+  name: string;
+  title: string;
+  mode: "live" | "fallback";
+  status: "idle" | "working" | "waiting_for_approval";
+  working_since: number | null;
+  working_reason: string;
+  last_output_ts: number | null;
+  last_output_t_sim: number | null;
+  tasks_completed: number;
+  pending_approvals: number;
+  note: string;
+}
+
+export interface BotOutputView {
+  id: number;
+  role: Role;
+  kind: string;
+  title: string;
+  body_markdown: string;
+  sources: { title: string; url: string }[];
+  via: "webhook" | "dropbox" | "fallback";
+  llm_source: string;
+  t_sim: number;
+  ts: number;
+  acked: number[];
+  checklist: string[];
+}
+
+export interface ApprovalView {
+  id: number;
+  output_id: number;
+  role: Role;
+  action: { type: string; summary: string; to?: string | null; body?: string };
+  status: "pending" | "approved" | "declined";
+  t_sim: number;
+  decided_t_sim: number | null;
+}
+
 export interface Snapshot {
   type: "snapshot";
   sim: SimSnapshot;
   alerts: AlertView[];
   log: LogEntry[];
+  bots: {
+    roster: BotView[];
+    outputs: BotOutputView[];
+    approvals: ApprovalView[];
+    minutes_saved: Record<string, number>;
+    minutes_assumptions: Record<string, number>;
+    live_timeout_s: number;
+  };
+  restrictions: string[];
   metrics: Record<string, number>;
   demo_mode: boolean;
   auto_pause: boolean;
@@ -97,6 +148,10 @@ export async function api<T = unknown>(path: string, body?: unknown): Promise<T>
 }
 
 export const simControl = (action: string, value?: number) => api("/api/sim/control", { action, value });
+export const decideApproval = (id: number, decision: "approve" | "decline") => api(`/api/approvals/${id}`, { decision });
+export const runBot = (role: Role, fallback = false) => api(`/api/bots/${role}/run`, { fallback });
+export const setBotMode = (role: Role, mode: "live" | "fallback") => api(`/api/bots/${role}/mode`, { mode });
+export const ackItem = (outputId: number, item: number) => api(`/api/bots/outputs/${outputId}/ack`, { item });
 export const decideAlert = (id: number, decision: "approve" | "dismiss") => api(`/api/alerts/${id}/decision`, { decision });
 
 /** Alerts the controller still needs to act on, most urgent first. */

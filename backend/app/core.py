@@ -9,6 +9,7 @@ from typing import Any, Optional
 from fastapi import WebSocket
 
 from .config import settings
+from .bots.service import TRIGGERS, BotService
 from .conflict.alerts import Alert, AlertManager
 from .conflict.probe import Maneuver, validate_maneuver
 from .llm import advisory, phraseology
@@ -43,10 +44,13 @@ class AppState:
         self.alerts = AlertManager()
         self.hub = Hub()
         self.auto_pause = settings.demo_mode
+        self.restrictions: list[str] = []
         self._tasks: set[asyncio.Task] = set()
         self._dirty = False
+        self.bots = BotService(self)
         self.reset_counters()
         self.log("sim", f"Scenario loaded: {self.engine.scenario.name}")
+        self._deferred = list(self.engine.fired)  # T+0 events run on the first tick, when the presenter hits run
 
     # ---- helpers -----------------------------------------------------------
     def reset_counters(self) -> None:
@@ -67,12 +71,19 @@ class AppState:
         await self.hub.broadcast(self.snapshot())
 
     def snapshot(self) -> dict[str, Any]:
+        bots = self.bots.view()
         return {
             "type": "snapshot",
             "sim": self.engine.snapshot(),
             "alerts": [a.view() for a in self.alerts.alerts[-20:]],
             "log": [e.model_dump() for e in self.store.logs(limit=150)],
-            "metrics": self.metrics,
+            "bots": bots,
+            "restrictions": self.restrictions,
+            "metrics": {
+                **self.metrics,
+                "bot_tasks_completed": sum(b["tasks_completed"] for b in bots["roster"]),
+                "minutes_saved": sum(self.bots.minutes_saved.values()),
+            },
             "demo_mode": settings.demo_mode,
             "auto_pause": self.auto_pause,
             "llm": {"enabled": settings.llm_enabled, "offline": settings.offline, "model": settings.xai_model or None},
@@ -86,20 +97,27 @@ class AppState:
         self.engine.running = False
         self.alerts.reset()
         self.store.new_run()
+        self.bots.reset()
+        self.restrictions = []
         self.reset_counters()
         self.log("sim", "Sim restarted")
+        self._deferred = list(self.engine.fired)
 
-    def seek(self, t: int) -> None:
-        """Jump to sim time t (restarting if needed). Conflicts found on the way are raised normally."""
+    async def seek(self, t: int) -> None:
+        """Jump to sim time t (restarting if needed). Advisories and Bot runs triggered on the
+        way are awaited tick by tick, so a jump produces the same picture as running in real time."""
         if t < self.engine.t:
             self.restart()
         while self.engine.t < min(t, self.engine.scenario.duration_s):
             self.tick()
+            if self._tasks:
+                await asyncio.gather(*list(self._tasks), return_exceptions=True)
 
     def tick(self) -> None:
         eng = self.engine
+        deferred, self._deferred = self._deferred, []
         fired = eng.tick()
-        for ev in fired:
+        for ev in deferred + fired:
             self.on_event(ev)
         new, escalated, resolved = self.alerts.update(eng.aircraft, eng.t)
         for a in new:
@@ -119,11 +137,15 @@ class AppState:
 
     def on_event(self, ev: FiredEvent) -> None:
         self.log("event", f"{ev.title}: {ev.detail}".rstrip(": "), event=ev.kind, **ev.data)
+        if ev.kind in TRIGGERS:
+            self.bots.trigger(TRIGGERS[ev.kind], ev.title.lower())
         if self.auto_pause and ev.kind in ("weather", "relief", "shift_end"):
             self.engine.running = False
 
     # ---- conflict advisories -------------------------------------------------
     async def generate_advisory(self, alert: Alert) -> None:
+        if alert.status != "active":
+            return
         try:
             result, ok, note = await advisory.advise(alert, self.engine.aircraft, self.engine.scenario.name)
         except Exception as e:  # never let an advisory failure break the sim
@@ -192,6 +214,7 @@ class AppState:
 async def sim_loop(state: AppState) -> None:
     while True:
         eng = state.engine
+        state.bots.check_live_timeouts()
         if eng.running and not eng.finished:
             started = time.monotonic()
             state.tick()

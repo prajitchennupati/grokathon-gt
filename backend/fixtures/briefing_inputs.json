@@ -1,0 +1,47 @@
+{
+  "_note": "SAMPLE FIXTURE for the offline demo. Hand-written to look like real products; not live data.",
+  "airport": "KATL",
+  "valid_for": "Day shift (1400Z-2200Z)",
+  "flow": "West flow",
+  "active_runways": {
+    "arrivals": ["26R", "27L", "28"],
+    "departures": ["26L", "27R"]
+  },
+  "airport_acceptance_rate": 126,
+  "metar": "KATL 021452Z 27009KT 10SM FEW045 SCT250 22/12 A3002 RMK AO2 SLP160 T02220122",
+  "taf": "KATL 021120Z 0212/0318 27010KT P6SM FEW045 SCT250 FM021800 26012G20KT P6SM VCTS SCT035CB BKN100 TEMPO 0220/0223 3SM TSRA BKN030CB FM030200 30006KT P6SM SCT250",
+  "weather_outlook": [
+    "Scattered thunderstorms developing west of ATL after 1800Z along a weak trough, moving ENE 15 kt.",
+    "SPC general thunder area covers north Georgia this afternoon; no severe risk.",
+    "CIGs VFR through the period outside convection."
+  ],
+  "notams": [
+    "!ATL 11/014 ATL RWY 9L/27R CLSD 0400-1000 DLY 2511020400-2511090959",
+    "!ATL 11/021 ATL TWY E BTN TWY D AND TWY F CLSD 2511011200-2511052359",
+    "!ATL 11/030 ATL NAV ILS RWY 9R GP U/S 2511021300-2511032100",
+    "!ATL 10/388 ATL OBST CRANE (ASN 2025-ASO-1234-NRA) 335812N0842612W (1.4NM NE APCH END RWY 26R) 1160FT (134FT AGL) FLAGGED AND LGTD 2510150000-2512312359"
+  ],
+  "runway_closures": [
+    "RWY 9L/27R closed nightly 0400-1000Z (not affecting day shift)",
+    "TWY E between D and F closed through 11/05"
+  ],
+  "equipment": [
+    "ASR-9 and ARSR normal",
+    "ILS 26R / 27L / 28 normal",
+    "ILS 9R glideslope out of service (east flow only)",
+    "ATIS: information KILO"
+  ],
+  "traffic_management": [
+    "No ground delay program in effect for ATL.",
+    "Arrival rate 126 west flow.",
+    "ZTL advisory: possible 10-15 MIT over the west arrival gate after 1800Z if convection develops.",
+    "Departure MIT 20 to ORD via ZID in effect 1600-2000Z."
+  ],
+  "sources": [
+    {"title": "AviationWeather.gov METAR KATL", "url": "https://aviationweather.gov/data/metar/?ids=KATL"},
+    {"title": "AviationWeather.gov TAF KATL", "url": "https://aviationweather.gov/data/taf/?ids=KATL"},
+    {"title": "FAA NOTAM Search", "url": "https://notams.aim.faa.gov/notamSearch/"},
+    {"title": "FAA NAS Status", "url": "https://nasstatus.faa.gov/"},
+    {"title": "ATCSCC Advisories Database", "url": "https://www.fly.faa.gov/adv/advADB.jsp"}
+  ]
+}

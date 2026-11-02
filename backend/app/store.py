@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from sqlalchemy import func
+from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from .models import Approval, BotOutput, LogEntry
@@ -12,8 +13,9 @@ from .models import Approval, BotOutput, LogEntry
 
 class Store:
     def __init__(self, path: Path | str) -> None:
-        url = "sqlite://" if str(path) == ":memory:" else f"sqlite:///{path}"
-        self.db = create_engine(url, connect_args={"check_same_thread": False})
+        memory = str(path) == ":memory:"
+        self.db = create_engine("sqlite://" if memory else f"sqlite:///{path}", connect_args={"check_same_thread": False},
+                                **({"poolclass": StaticPool} if memory else {}))
         SQLModel.metadata.create_all(self.db)
         with Session(self.db) as s:
             last = s.exec(select(func.max(LogEntry.run_id))).one()

@@ -2,13 +2,35 @@ import { useEffect, useRef, useState } from "react";
 import Scope from "./components/Scope";
 import AlertPanel from "./components/AlertPanel";
 import ShiftLog from "./components/ShiftLog";
+import BotRoster from "./components/BotRoster";
+import ApprovalQueue from "./components/ApprovalQueue";
+import BriefingView from "./components/BriefingView";
 import { actionableAlerts, decideAlert, fmtT, simControl, useScenario, useSnapshot, type Snapshot } from "./api";
 
 export default function App() {
   const scenario = useScenario();
   const { snap, connected } = useSnapshot();
   const [selected, setSelected] = useState<string | null>(null);
+  const [tab, setTab] = useState<"outputs" | "log">("log");
+  const [outputId, setOutputId] = useState<number | null>(null);
   const sim = snap?.sim;
+  const outputs = snap?.bots.outputs ?? [];
+
+  // surface each new Bot output as it arrives
+  const seenOutputs = useRef(0);
+  useEffect(() => {
+    if (outputs.length > seenOutputs.current) {
+      setOutputId(outputs[outputs.length - 1].id);
+      setTab("outputs");
+    }
+    seenOutputs.current = outputs.length;
+  }, [outputs.length]);
+
+  const openOutput = (id: number) => { setOutputId(id); setTab("outputs"); };
+  const openRole = (role: string) => {
+    const o = [...outputs].reverse().find((x) => x.role === role);
+    if (o) openOutput(o.id);
+  };
 
   // keyboard shortcuts read the latest snapshot through a ref
   const snapRef = useRef<Snapshot | null>(null);
@@ -59,8 +81,18 @@ export default function App() {
               <div className="p-8 text-green-700">Connecting to backend…</div>
             )}
           </div>
-          <div className="h-44 border-t border-edge bg-panel">
-            <ShiftLog log={snap?.log ?? []} />
+          <div className="flex h-[40%] min-h-[220px] flex-col border-t border-edge bg-panel">
+            <div className="flex gap-1 border-b border-edge px-2 pt-1 text-xs">
+              {([["outputs", `Bot outputs (${outputs.length})`], ["log", "Shift log"]] as const).map(([k, label]) => (
+                <button key={k} onClick={() => setTab(k)}
+                  className={`rounded-t border border-b-0 px-3 py-1 ${tab === k ? "border-edge bg-black text-target" : "border-transparent text-green-700 hover:text-green-400"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="min-h-0 flex-1">
+              {tab === "log" ? <ShiftLog log={snap?.log ?? []} /> : <BriefingView outputs={outputs} selectedId={outputId} onSelect={setOutputId} />}
+            </div>
           </div>
         </main>
 
@@ -86,6 +118,8 @@ export default function App() {
           )}
 
           <AlertPanel alerts={snap?.alerts ?? []} onFocus={setSelected} />
+          <ApprovalQueue approvals={snap?.bots.approvals ?? []} onOpen={openOutput} />
+          <BotRoster roster={snap?.bots.roster ?? []} onOpen={openRole} />
 
           <section className="rounded border border-edge p-3">
             <div className="mb-1 text-xs uppercase tracking-wider text-green-700">Selected</div>

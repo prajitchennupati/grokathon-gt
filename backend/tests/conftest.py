@@ -1,7 +1,15 @@
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
+
+# isolate the app from the developer's .env / database before anything imports settings
+os.environ.update({
+    "CLEARANCE_DB": ":memory:", "BOT_DROPBOX": tempfile.mkdtemp(prefix="clearance-dropbox-"),
+    "CLEARANCE_TOKEN": "test-token", "XAI_API_KEY": "", "CLEARANCE_OFFLINE": "1", "DEMO_MODE": "0",
+})
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
