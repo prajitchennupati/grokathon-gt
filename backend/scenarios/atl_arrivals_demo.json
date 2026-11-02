@@ -371,6 +371,23 @@
       "flight_rules": "VFR",
       "origin": "KFTY",
       "destination": "KRMG"
+    },
+    {
+      "callsign": "N8734K",
+      "type": "PA28",
+      "lat": 33.47676,
+      "lon": -84.08926,
+      "alt_ft": 8500,
+      "heading": 247.7,
+      "gs_kt": 120,
+      "route": [
+        "BRAVS"
+      ],
+      "land": null,
+      "spawn_t": 240,
+      "flight_rules": "VFR",
+      "origin": "KLZU",
+      "destination": "KLGC"
     }
   ],
   "events": [

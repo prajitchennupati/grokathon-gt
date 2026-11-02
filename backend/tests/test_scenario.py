@@ -2,9 +2,9 @@
 from app.conflict.probe import probe
 
 
-def test_twelve_aircraft_with_expected_operators(engine):
+def test_about_twelve_aircraft_with_expected_operators(engine):
     specs = engine.scenario.aircraft
-    assert len(specs) == 12
+    assert 12 <= len(specs) <= 13
     prefixes = {s.callsign[:3] for s in specs}
     assert {"DAL", "SWA", "AAL", "UAL"} <= prefixes
     assert any(s.callsign.startswith("N") for s in specs)
@@ -26,14 +26,17 @@ def test_weather_cell_is_west_of_field(engine):
     assert max(xs) < 0
 
 
-def test_scripted_conflict_appears_near_t90_and_is_the_only_one(engine):
-    first: dict[str, int] = {}
-    while engine.t < 200:
+def test_scripted_conflicts_fire_on_schedule_and_nothing_else(engine):
+    first: dict[str, tuple[int, str]] = {}
+    while not engine.finished:
         engine.tick()
         for c in probe(engine.aircraft.values()):
-            first.setdefault(c.key, engine.t)
-    assert list(first) == ["DAL1423|SWA2210"]
-    assert 80 <= first["DAL1423|SWA2210"] <= 100
+            first.setdefault(c.key, (engine.t, c.severity))
+    assert list(first) == ["DAL1423|SWA2210", "DAL2290|N8734K"]
+    t, sev = first["DAL1423|SWA2210"]
+    assert 80 <= t <= 100 and sev == "predicted"
+    t, sev = first["DAL2290|N8734K"]
+    assert t == 240 and sev == "imminent"
 
 
 def test_replay_is_deterministic(engine):

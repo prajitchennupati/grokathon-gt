@@ -49,10 +49,41 @@ export interface SimSnapshot {
   events_fired: { t: number; kind: string; title: string; detail: string }[];
 }
 
+export interface SuggestionView { callsign: string; action: "climb" | "descend" | "turn" | "speed"; value: number; phraseology: string }
+
+export interface AlertView {
+  id: number;
+  key: string;
+  a: string;
+  b: string;
+  created_t: number;
+  severity: "predicted" | "imminent";
+  max_severity: string;
+  geometry: { t_cpa: number; lateral_nm: number; vertical_ft: number; t_los: number; severity: string };
+  status: "active" | "resolved";
+  resolved_t: number | null;
+  advisory_state: "pending" | "ready";
+  advisory: { summary: string; suggestion: SuggestionView; rationale: string } | null;
+  advisory_source: string;
+  advisory_error: string;
+  suggestion_valid: boolean;
+  validation_note: string;
+  decision: "approved" | "dismissed" | null;
+  decision_t: number | null;
+  min_sep: { t: number; lateral_nm: number; vertical_ft: number } | null;
+}
+
+export interface LogEntry { id: number; t_sim: number; ts: number; kind: string; actor: string; message: string; data: Record<string, unknown> }
+
 export interface Snapshot {
   type: "snapshot";
   sim: SimSnapshot;
+  alerts: AlertView[];
+  log: LogEntry[];
+  metrics: Record<string, number>;
   demo_mode: boolean;
+  auto_pause: boolean;
+  llm: { enabled: boolean; offline: boolean; model: string | null };
 }
 
 export async function api<T = unknown>(path: string, body?: unknown): Promise<T> {
@@ -66,6 +97,14 @@ export async function api<T = unknown>(path: string, body?: unknown): Promise<T>
 }
 
 export const simControl = (action: string, value?: number) => api("/api/sim/control", { action, value });
+export const decideAlert = (id: number, decision: "approve" | "dismiss") => api(`/api/alerts/${id}/decision`, { decision });
+
+/** Alerts the controller still needs to act on, most urgent first. */
+export function actionableAlerts(alerts: AlertView[]): AlertView[] {
+  return alerts
+    .filter((a) => a.status === "active")
+    .sort((x, y) => (x.severity === y.severity ? x.geometry.t_cpa - y.geometry.t_cpa : x.severity === "imminent" ? -1 : 1));
+}
 
 /** Live snapshot stream with auto-reconnect. */
 export function useSnapshot(): { snap: Snapshot | null; connected: boolean } {

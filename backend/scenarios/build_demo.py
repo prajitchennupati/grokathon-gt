@@ -155,8 +155,26 @@ def report(data: dict) -> None:
         print(f"T+{l['t']:3d}s landed {l['callsign']} {l['runway']}")
 
 
+def add_popup(data: dict) -> None:
+    """Pop-up VFR target (just climbed into radar coverage) crossing DAL2290's path at
+    8,500 ft. Imminent the moment it appears, so the shift has an incident to report."""
+    eng = SimEngine(Scenario.model_validate(data))
+    eng.run_until(POPUP_T + POPUP_CPA_S)
+    tgt = eng.aircraft["DAL2290"]
+    bx, by = fix_xy("BRAVS")
+    to_bravs = math.degrees(math.atan2(bx - tgt.x, by - tgt.y)) % 360.0
+    start = behind((tgt.x, tgt.y), (to_bravs + 180.0) % 360.0, 120, POPUP_CPA_S)
+    data["aircraft"].append(ac("N8734K", "PA28", start, 8500, 120, ["BRAVS"], None, spawn_t=POPUP_T,
+                               flight_rules="VFR", origin="KLZU", destination="KLGC"))
+
+
+POPUP_T = 240
+POPUP_CPA_S = 40
+
+
 if __name__ == "__main__":
     d = build()
+    add_popup(d)
     OUT.write_text(json.dumps(d, indent=2) + "\n")
     print(f"wrote {OUT}")
     report(d)

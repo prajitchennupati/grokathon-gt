@@ -3,63 +3,21 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .config import settings
-from .sim.engine import SimEngine
-from .sim.scenario import load_scenario
-
-
-class Hub:
-    """Fan-out of state snapshots to connected WebSocket clients."""
-
-    def __init__(self) -> None:
-        self.clients: set[WebSocket] = set()
-
-    async def broadcast(self, msg: dict[str, Any]) -> None:
-        dead = []
-        for ws in self.clients:
-            try:
-                await ws.send_json(msg)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            self.clients.discard(ws)
-
-
-class AppState:
-    def __init__(self) -> None:
-        self.engine = SimEngine(load_scenario(settings.scenarios_dir / settings.scenario))
-        self.hub = Hub()
-
-    def snapshot(self) -> dict[str, Any]:
-        return {"type": "snapshot", "sim": self.engine.snapshot(), "demo_mode": settings.demo_mode}
-
-    async def push(self) -> None:
-        await self.hub.broadcast(self.snapshot())
-
+from .core import AppState, sim_loop
 
 state = AppState()
 
 
-async def sim_loop() -> None:
-    while True:
-        eng = state.engine
-        if eng.running and not eng.finished:
-            eng.tick()
-            await state.push()
-            await asyncio.sleep(1.0 / eng.speed)
-        else:
-            await asyncio.sleep(0.1)
-
-
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI):
-    task = asyncio.create_task(sim_loop())
+    task = asyncio.create_task(sim_loop(state))
     yield
     task.cancel()
 
@@ -70,7 +28,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.get("/api/health")
 def health() -> dict[str, Any]:
-    return {"ok": True, "llm_enabled": settings.llm_enabled, "offline": settings.offline}
+    return {"ok": True, "llm_enabled": settings.llm_enabled, "offline": settings.offline, "demo_mode": settings.demo_mode}
 
 
 @app.get("/api/scenario")
@@ -84,7 +42,7 @@ def get_state() -> dict[str, Any]:
 
 
 class SimControl(BaseModel):
-    action: str  # pause | resume | toggle | restart | speed | seek
+    action: Literal["pause", "resume", "toggle", "restart", "speed", "seek", "auto_pause"]
     value: Optional[int] = None
 
 
@@ -98,8 +56,7 @@ async def sim_control(body: SimControl) -> dict[str, Any]:
     elif body.action == "toggle":
         eng.running = not eng.running
     elif body.action == "restart":
-        eng.reset()
-        eng.running = False
+        state.restart()
     elif body.action == "speed":
         try:
             eng.set_speed(int(body.value or 1))
@@ -108,13 +65,44 @@ async def sim_control(body: SimControl) -> dict[str, Any]:
     elif body.action == "seek":
         if body.value is None:
             raise HTTPException(400, "seek needs value")
-        if body.value < eng.t:
-            eng.reset()
-        eng.run_until(body.value)
-    else:
-        raise HTTPException(400, f"unknown action {body.action}")
+        state.seek(body.value)
+    elif body.action == "auto_pause":
+        state.auto_pause = bool(body.value)
     await state.push()
     return {"t": eng.t, "running": eng.running, "speed": eng.speed}
+
+
+class AlertDecision(BaseModel):
+    decision: Literal["approve", "dismiss"]
+
+
+@app.post("/api/alerts/{alert_id}/decision")
+async def alert_decision(alert_id: int, body: AlertDecision) -> dict[str, Any]:
+    try:
+        a = state.decide_alert(alert_id, body.decision)
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    await state.push()
+    return a.view()
+
+
+class Instruction(BaseModel):
+    callsign: str
+    action: Literal["climb", "descend", "turn", "speed"]
+    value: float
+
+
+@app.post("/api/instructions")
+async def instruction(body: Instruction) -> dict[str, Any]:
+    """Controller-issued instruction from the scope (not an advisory)."""
+    try:
+        text = state.manual_instruction(body.callsign, body.action, body.value)
+    except KeyError:
+        raise HTTPException(404, f"{body.callsign} not on scope")
+    await state.push()
+    return {"phraseology": text}
 
 
 @app.websocket("/ws")

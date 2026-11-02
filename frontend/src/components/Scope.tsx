@@ -37,6 +37,14 @@ export default function Scope({ scenario, sim, selected, onSelect, conflicts = [
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [view, setView] = useState({ scale: 11, cx: 2, cy: 2 }); // px per nm, center in nm
   const drag = useRef<{ x: number; y: number; cx: number; cy: number; moved: boolean } | null>(null);
+  const [, setBlink] = useState(0);
+
+  // conflict targets flash independently of the sim tick
+  useEffect(() => {
+    if (!conflicts.length) return;
+    const id = window.setInterval(() => setBlink((b) => b + 1), 250);
+    return () => window.clearInterval(id);
+  }, [conflicts.length]);
 
   // history trails, one dot per sim second
   if (sim.t !== lastT.current) {
