@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+frontend/dist/
+.env
+*.db
+bot_dropbox/*
+!bot_dropbox/README.md
+exports/
+.DS_Store

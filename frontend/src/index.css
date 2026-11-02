@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@theme {
+  --color-scope: #000000;
+  --color-panel: #0a0f0d;
+  --color-edge: #1c2b24;
+  --color-target: #39ff7a;
+  --color-select: #2ee6ff;
+  --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+}
+
+html, body, #root { height: 100%; }
+body { font-family: var(--font-mono); color: #b8f5cf; }
+
+@keyframes alertflash { 0%, 100% { background-color: rgb(127 29 29 / 0.9); } 50% { background-color: rgb(239 68 68 / 0.35); } }
+.alert-flash { animation: alertflash 1s steps(1) infinite; }

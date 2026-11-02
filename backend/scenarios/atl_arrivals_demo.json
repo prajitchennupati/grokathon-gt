@@ -1,0 +1,444 @@
+{
+  "name": "ATL Westflow Arrivals \u2014 demo",
+  "description": "Twelve arrivals into Atlanta, westflow (26R/27L/28). Scripted converging pair at T+90, weather cell west of the field at T+150, position relief at T+210.",
+  "facility": "A80 (Atlanta TRACON)",
+  "position": "Final/Arrival \u2014 west flow",
+  "airport": {
+    "icao": "KATL",
+    "name": "Hartsfield\u2013Jackson Atlanta Intl",
+    "lat": 33.6367,
+    "lon": -84.4281,
+    "elevation_ft": 1026
+  },
+  "runways": [
+    {
+      "id": "26R",
+      "thr_lat": 33.6497,
+      "thr_lon": -84.40968,
+      "end_lat": 33.6497,
+      "end_lon": -84.43911
+    },
+    {
+      "id": "27L",
+      "thr_lat": 33.63187,
+      "thr_lon": -84.41829,
+      "end_lat": 33.63187,
+      "end_lon": -84.45212
+    },
+    {
+      "id": "28",
+      "thr_lat": 33.62003,
+      "thr_lon": -84.41008,
+      "end_lat": 33.62003,
+      "end_lon": -84.44572
+    }
+  ],
+  "fixes": [
+    {
+      "id": "RW26R",
+      "lat": 33.6497,
+      "lon": -84.40968,
+      "kind": "runway"
+    },
+    {
+      "id": "RW27L",
+      "lat": 33.63187,
+      "lon": -84.41829,
+      "kind": "runway"
+    },
+    {
+      "id": "RW28",
+      "lat": 33.62003,
+      "lon": -84.41008,
+      "kind": "runway"
+    },
+    {
+      "id": "DOOLY",
+      "lat": 33.6497,
+      "lon": -84.16986,
+      "kind": "faf"
+    },
+    {
+      "id": "PRYOR",
+      "lat": 33.63187,
+      "lon": -84.17787,
+      "kind": "faf"
+    },
+    {
+      "id": "TAXUS",
+      "lat": 33.62003,
+      "lon": -84.16986,
+      "kind": "faf"
+    },
+    {
+      "id": "ROSWL",
+      "lat": 33.80337,
+      "lon": -84.14784,
+      "kind": "fix"
+    },
+    {
+      "id": "LOGAN",
+      "lat": 33.4367,
+      "lon": -84.10781,
+      "kind": "fix"
+    },
+    {
+      "id": "FALCN",
+      "lat": 33.7367,
+      "lon": -84.78843,
+      "kind": "fix"
+    },
+    {
+      "id": "CHERO",
+      "lat": 33.87003,
+      "lon": -84.4281,
+      "kind": "fix"
+    },
+    {
+      "id": "DAWGS",
+      "lat": 34.10337,
+      "lon": -83.86758,
+      "kind": "fix"
+    },
+    {
+      "id": "PEACH",
+      "lat": 33.17003,
+      "lon": -83.86758,
+      "kind": "fix"
+    },
+    {
+      "id": "HAWKS",
+      "lat": 34.10337,
+      "lon": -84.98862,
+      "kind": "fix"
+    },
+    {
+      "id": "BRAVS",
+      "lat": 33.17003,
+      "lon": -84.98862,
+      "kind": "fix"
+    }
+  ],
+  "sectors": [
+    {
+      "id": "N",
+      "name": "North arrival",
+      "polygon": [
+        [
+          33.6867,
+          -85.02865
+        ],
+        [
+          34.1367,
+          -85.02865
+        ],
+        [
+          34.1367,
+          -83.82755
+        ],
+        [
+          33.6867,
+          -83.82755
+        ]
+      ]
+    },
+    {
+      "id": "S",
+      "name": "South arrival",
+      "polygon": [
+        [
+          33.5867,
+          -85.02865
+        ],
+        [
+          33.1367,
+          -85.02865
+        ],
+        [
+          33.1367,
+          -83.82755
+        ],
+        [
+          33.5867,
+          -83.82755
+        ]
+      ]
+    }
+  ],
+  "duration_s": 360,
+  "aircraft": [
+    {
+      "callsign": "AAL1187",
+      "type": "A321",
+      "lat": 33.6497,
+      "lon": -84.2099,
+      "alt_ft": 4000,
+      "heading": 270,
+      "gs_kt": 180,
+      "route": [
+        "RW26R"
+      ],
+      "land": "26R",
+      "origin": "KDFW",
+      "destination": "KATL"
+    },
+    {
+      "callsign": "DAL892",
+      "type": "A21N",
+      "lat": 33.63187,
+      "lon": -84.07778,
+      "alt_ft": 5000,
+      "heading": 270,
+      "gs_kt": 210,
+      "route": [
+        "RW27L"
+      ],
+      "land": "27L",
+      "origin": "KMCO",
+      "destination": "KATL"
+    },
+    {
+      "callsign": "UAL455",
+      "type": "B738",
+      "lat": 33.47837,
+      "lon": -84.11781,
+      "alt_ft": 6000,
+      "heading": 343.0,
+      "gs_kt": 220,
+      "route": [
+        "TAXUS",
+        "RW28"
+      ],
+      "land": "28",
+      "assigned_alt_ft": 5000,
+      "origin": "KIAH",
+      "destination": "KATL"
+    },
+    {
+      "callsign": "DAL1423",
+      "type": "B739",
+      "lat": 34.0137,
+      "lon": -83.89521,
+      "alt_ft": 8000,
+      "heading": 225.0,
+      "gs_kt": 250,
+      "route": [
+        "ROSWL",
+        "DOOLY",
+        "RW26R"
+      ],
+      "land": "26R",
+      "origin": "KBOS",
+      "destination": "KATL"
+    },
+    {
+      "callsign": "SWA2210",
+      "type": "B38M",
+      "lat": 34.10565,
+      "lon": -84.21186,
+      "alt_ft": 8000,
+      "heading": 170.0,
+      "gs_kt": 260,
+      "route": [
+        "ROSWL",
+        "DOOLY",
+        "RW26R"
+      ],
+      "land": "26R",
+      "origin": "KMDW",
+      "destination": "KATL"
+    },
+    {
+      "callsign": "DAL1066",
+      "type": "B712",
+      "lat": 34.13646,
+      "lon": -83.74776,
+      "alt_ft": 12000,
+      "heading": 225.0,
+      "gs_kt": 250,
+      "route": [
+        "ROSWL",
+        "DOOLY",
+        "RW26R"
+      ],
+      "land": "26R",
+      "origin": "KLGA",
+      "destination": "KATL"
+    },
+    {
+      "callsign": "DAL2290",
+      "type": "B752",
+      "lat": 33.2367,
+      "lon": -83.78751,
+      "alt_ft": 11000,
+      "heading": 306.9,
+      "gs_kt": 280,
+      "route": [
+        "LOGAN",
+        "PRYOR",
+        "RW27L"
+      ],
+      "land": "27L",
+      "clearances": [
+        {
+          "t": 60,
+          "alt_ft": 9000,
+          "note": "descend via profile"
+        }
+      ],
+      "origin": "KMIA",
+      "destination": "KATL"
+    },
+    {
+      "callsign": "SWA1784",
+      "type": "B737",
+      "lat": 33.27003,
+      "lon": -84.90854,
+      "alt_ft": 12000,
+      "heading": 75,
+      "gs_kt": 270,
+      "route": [
+        "LOGAN",
+        "TAXUS",
+        "RW28"
+      ],
+      "land": "28",
+      "origin": "KMSY",
+      "destination": "KATL"
+    },
+    {
+      "callsign": "UAL1712",
+      "type": "B39M",
+      "lat": 33.87003,
+      "lon": -85.10873,
+      "alt_ft": 10000,
+      "heading": 116.6,
+      "gs_kt": 280,
+      "route": [
+        "FALCN",
+        "CHERO"
+      ],
+      "land": null,
+      "origin": "KDEN",
+      "destination": "KATL"
+    },
+    {
+      "callsign": "N451GA",
+      "type": "GLF4",
+      "lat": 33.97003,
+      "lon": -85.02865,
+      "alt_ft": 9000,
+      "heading": 139.4,
+      "gs_kt": 300,
+      "route": [
+        "FALCN",
+        "CHERO"
+      ],
+      "land": null,
+      "spawn_t": 20,
+      "origin": "KTEB",
+      "destination": "KPDK"
+    },
+    {
+      "callsign": "AAL2541",
+      "type": "A319",
+      "lat": 34.0367,
+      "lon": -85.22884,
+      "alt_ft": 11000,
+      "heading": 129.3,
+      "gs_kt": 290,
+      "route": [
+        "FALCN",
+        "CHERO"
+      ],
+      "land": null,
+      "spawn_t": 40,
+      "origin": "KPHX",
+      "destination": "KATL"
+    },
+    {
+      "callsign": "N172SP",
+      "type": "C172",
+      "lat": 33.90337,
+      "lon": -84.54821,
+      "alt_ft": 3500,
+      "heading": 298.6,
+      "gs_kt": 100,
+      "route": [
+        "HAWKS"
+      ],
+      "land": null,
+      "flight_rules": "VFR",
+      "origin": "KFTY",
+      "destination": "KRMG"
+    }
+  ],
+  "events": [
+    {
+      "t": 0,
+      "kind": "shift_start",
+      "title": "Shift start",
+      "detail": "Day shift, A80 arrival position opens."
+    },
+    {
+      "t": 150,
+      "kind": "weather",
+      "title": "Convective cell west of field",
+      "detail": "Heavy precipitation developing over FALCN, moving ENE ~15 kt.",
+      "polygon": [
+        [
+          33.7867,
+          -84.74839
+        ],
+        [
+          33.75054,
+          -84.68406
+        ],
+        [
+          33.69886,
+          -84.66559
+        ],
+        [
+          33.64087,
+          -84.65304
+        ],
+        [
+          33.5849,
+          -84.70389
+        ],
+        [
+          33.60839,
+          -84.78263
+        ],
+        [
+          33.6492,
+          -84.82641
+        ],
+        [
+          33.70406,
+          -84.86668
+        ],
+        [
+          33.75309,
+          -84.81531
+        ]
+      ],
+      "intensity": "heavy",
+      "drift_kt": 15,
+      "drift_heading": 70,
+      "affects_fix": "FALCN"
+    },
+    {
+      "t": 210,
+      "kind": "relief",
+      "title": "Position relief",
+      "detail": "Relieving controller plugs in."
+    },
+    {
+      "t": 355,
+      "kind": "shift_end",
+      "title": "End of shift",
+      "detail": "Position closes; paperwork due."
+    }
+  ]
+}
