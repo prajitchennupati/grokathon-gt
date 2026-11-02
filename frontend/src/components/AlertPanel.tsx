@@ -62,7 +62,12 @@ function AlertCard({ alert: a, top, onFocus }: { alert: AlertView; top: boolean;
         <div className="mt-2 animate-pulse text-xs text-cyan-300">Grok is analysing the conflict…</div>
       ) : (
         <>
-          {a.advisory && <div className="mt-2 text-xs text-white">{a.advisory.summary}</div>}
+          {a.advisory && (
+            <div className="mt-2 text-xs text-white">
+              <span className="mr-1 text-[10px] text-red-400">@{fmtT(a.created_t)}</span>
+              {a.advisory.summary}
+            </div>
+          )}
           {showSuggestion ? (
             <div className="mt-2 rounded border border-cyan-700 bg-black/60 p-2">
               <div className="text-[10px] uppercase tracking-wider text-cyan-600">Suggested · probe-verified</div>

@@ -5,6 +5,8 @@ import ShiftLog from "./components/ShiftLog";
 import BotRoster from "./components/BotRoster";
 import ApprovalQueue from "./components/ApprovalQueue";
 import BriefingView from "./components/BriefingView";
+import MetricsStrip from "./components/MetricsStrip";
+import DemoScript from "./components/DemoScript";
 import { actionableAlerts, decideAlert, fmtT, simControl, useScenario, useSnapshot, type Snapshot } from "./api";
 
 export default function App() {
@@ -13,6 +15,7 @@ export default function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTab] = useState<"outputs" | "log">("log");
   const [outputId, setOutputId] = useState<number | null>(null);
+  const [showDemo, setShowDemo] = useState<boolean | null>(null); // null = follow backend demo mode
   const sim = snap?.sim;
   const outputs = snap?.bots.outputs ?? [];
 
@@ -69,10 +72,15 @@ export default function App() {
             LLM: {snap.llm.offline ? "offline (cache)" : snap.llm.enabled ? snap.llm.model : "no key — fallbacks"}
           </div>
         )}
+        <button onClick={() => setShowDemo(!(showDemo ?? snap?.demo_mode))} className="text-[10px] text-amber-500 hover:underline">
+          Demo script
+        </button>
         <div className={`text-xs ${connected ? "text-green-500" : "text-red-500"}`}>{connected ? "● LIVE" : "○ RECONNECTING"}</div>
       </header>
+      {snap && <MetricsStrip snap={snap} />}
 
       <div className="flex min-h-0 flex-1">
+        {sim && (showDemo ?? snap?.demo_mode) && <DemoScript t={sim.t} onClose={() => setShowDemo(false)} />}
         <main className="flex min-w-0 flex-1 flex-col">
           <div className="relative min-h-0 flex-1">
             {scenario && sim ? (

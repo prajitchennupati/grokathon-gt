@@ -172,15 +172,19 @@ export function useSnapshot(): { snap: Snapshot | null; connected: boolean } {
     let closed = false;
     const connect = () => {
       const proto = location.protocol === "https:" ? "wss" : "ws";
-      ws = new WebSocket(`${proto}://${location.host}/ws`);
-      ws.onopen = () => setConnected(true);
-      ws.onmessage = (e) => {
+      const sock = new WebSocket(`${proto}://${location.host}/ws`);
+      ws = sock;
+      // events from a superseded socket (StrictMode remount, reconnect) must not clobber state
+      sock.onopen = () => { if (ws === sock && !closed) setConnected(true); };
+      sock.onmessage = (e) => {
+        if (ws !== sock || closed) return;
         const msg = JSON.parse(e.data);
         if (msg.type === "snapshot") setSnap(msg);
       };
-      ws.onclose = () => {
+      sock.onclose = () => {
+        if (ws !== sock || closed) return;
         setConnected(false);
-        if (!closed) retry.current = window.setTimeout(connect, 1000);
+        retry.current = window.setTimeout(connect, 1000);
       };
     };
     connect();

@@ -179,3 +179,17 @@ def test_grokbot_instructions_have_inbox_url_and_no_secret(client, role):
     assert r.status_code == 200
     assert f"/api/bots/{role}/inbox" in r.text and '"role": "' + role + '"' in r.text
     assert "{{CLEARANCE_TOKEN}}" in r.text and "test-token" not in r.text
+
+
+def test_demo_steps_hit_every_beat(client):
+    c, _ = client
+    steps = c.get("/api/demo/steps").json()
+    assert [s["id"] for s in steps] == ["shift_start", "conflict", "weather", "relief", "popup", "shift_end"]
+    for s in steps:
+        assert c.post(f"/api/demo/steps/{s['id']}").status_code == 200
+        snap = c.get("/api/state").json()
+        assert snap["sim"]["t"] == s["t"] and not snap["sim"]["running"]
+        if s["id"] == "conflict":
+            assert snap["alerts"][0]["advisory_state"] == "ready"
+    kinds = {o["kind"] for o in c.get("/api/state").json()["bots"]["outputs"]}
+    assert kinds == {"shift_briefing", "coordination_drafts", "relief_briefing", "shift_summary", "incident_report"}

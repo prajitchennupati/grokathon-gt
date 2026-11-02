@@ -64,7 +64,12 @@ export default function Scope({ scenario, sim, selected, onSelect, conflicts = [
   useEffect(() => {
     const el = wrap.current;
     if (!el) return;
-    const ro = new ResizeObserver(([e]) => setSize({ w: e.contentRect.width, h: e.contentRect.height }));
+    const measure = () => {
+      const r = el.getBoundingClientRect();
+      setSize((s) => (s.w === r.width && s.h === r.height ? s : { w: r.width, h: r.height }));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
@@ -245,11 +250,11 @@ export default function Scope({ scenario, sim, selected, onSelect, conflicts = [
   }
 
   return (
-    <div ref={wrap} className="relative h-full w-full overflow-hidden bg-black select-none">
+    <div ref={wrap} className="absolute inset-0 overflow-hidden bg-black select-none">
       <canvas
         ref={canvas}
         style={{ width: size.w, height: size.h }}
-        className="cursor-crosshair"
+        className="absolute left-0 top-0 cursor-crosshair"
         onWheel={(e) => {
           const [nx, ny] = toNm(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
           const scale = Math.min(60, Math.max(3, view.scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
@@ -271,7 +276,7 @@ export default function Scope({ scenario, sim, selected, onSelect, conflicts = [
         }}
         onMouseLeave={() => { drag.current = null; }}
       />
-      <div className="pointer-events-none absolute bottom-2 left-2 text-[10px] text-green-700">
+      <div className="pointer-events-none absolute bottom-2 right-3 text-[10px] text-green-800">
         {scenario.airport.icao} · rings {RING_NM} nm · scroll to zoom · drag to pan · click a target
       </div>
     </div>

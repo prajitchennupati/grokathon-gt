@@ -2,7 +2,7 @@ PY      := $(CURDIR)/.venv/bin/python
 BACKEND := cd backend &&
 FRONT   := cd frontend &&
 
-.PHONY: setup dev demo test backend frontend scenario precache build
+.PHONY: setup dev demo test scenario precache build
 
 setup:
 	python3 -m venv .venv
@@ -26,6 +26,10 @@ demo:
 test:
 	$(BACKEND) $(PY) -m pytest -q
 	$(FRONT) npx tsc --noEmit -p .
+
+# Record real Grok responses for every demo beat into backend/app/llm/cache (needs XAI_API_KEY)
+precache:
+	$(BACKEND) $(PY) -m app.precache
 
 scenario:
 	$(BACKEND) $(PY) -m scenarios.build_demo

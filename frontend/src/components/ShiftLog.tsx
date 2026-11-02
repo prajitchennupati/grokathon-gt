@@ -15,7 +15,9 @@ const KIND_COLOR: Record<string, string> = {
 
 export default function ShiftLog({ log }: { log: LogEntry[] }) {
   const end = useRef<HTMLDivElement>(null);
-  useEffect(() => end.current?.scrollIntoView({ block: "nearest" }), [log.length]);
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "nearest" });
+  }, [log.length]);
 
   return (
     <div className="h-full overflow-y-auto px-3 py-2 text-[11px] leading-relaxed">

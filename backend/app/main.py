@@ -245,3 +245,27 @@ def grokbot_instructions(role: str) -> Response:
     text = (folder / f"{_role(role)}.md").read_text() + "\n" + (folder / "_common.md").read_text().split("-->", 1)[-1]
     text = text.replace("{{PUBLIC_BASE_URL}}", settings.public_base_url).replace("{{ROLE}}", role)
     return Response(text, media_type="text/markdown")
+
+
+# ---------------------------------------------------------------------------
+# Demo script
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/demo/steps")
+def demo_steps() -> list[dict[str, Any]]:
+    from .demo import STEPS
+
+    return STEPS
+
+
+@app.post("/api/demo/steps/{step_id}")
+async def demo_step(step_id: str) -> dict[str, Any]:
+    from .demo import run_step
+
+    try:
+        step = await run_step(state, step_id)
+    except KeyError:
+        raise HTTPException(404, f"no demo step {step_id}")
+    await state.push()
+    return step
